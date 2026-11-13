@@ -1,0 +1,24 @@
+# Plantilla canónica de órdenes (formato propio, independiente de la plataforma).
+# Sirve para cargar datos de cualquier plataforma mientras no exista mapeo directo
+# de su reporte, y para cargar historia.
+name: plantilla_ordenes
+platform: from_column          # la columna 'plataforma' dice a cuál pertenece cada fila
+dataset: orders
+verified: true
+file_glob: ["plantilla_ordenes*.csv", "plantilla_ordenes*.xlsx"]
+read: {sep: ",", decimal: ".", thousands: null, dayfirst: false}
+datetime_format: "%Y-%m-%d %H:%M"
+columns:
+  platform: plataforma           # justo | rappi | ubereats
+  order_id: id_orden
+  store: tienda                  # ID de tienda en la plataforma o nombre/alias de la sucursal
+  created_at: fecha_hora         # AAAA-MM-DD HH:MM, hora local
+  status: estado                 # completada | cancelada | rechazada
+  gross_amount: venta_bruta
+  discount_merchant: descuento_local
+  discount_platform: descuento_plataforma
+  commission: comision
+  other_fees: otros_cargos
+  payout_amount: liquidacion
+  cancel_reason: motivo_cancelacion
+status_map: {completada: completed, cancelada: cancelled, rechazada: rejected}

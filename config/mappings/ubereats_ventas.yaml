@@ -1,0 +1,18 @@
+# Uber Eats Manager > Informes (reporte de pagos / detalle de pedidos, CSV).
+# NO VERIFICADO: completar con un CSV real descargado desde Uber Eats Manager.
+name: ubereats_ventas
+platform: ubereats
+dataset: orders
+verified: false
+file_glob: ["*uber*eats*pago*.csv", "*payment*details*.csv"]
+read: {sep: ",", decimal: "."}
+columns:
+  order_id: COMPLETAR
+  store: COMPLETAR
+  created_at: COMPLETAR
+  status: COMPLETAR
+  gross_amount: COMPLETAR
+  commission: COMPLETAR
+  payout_amount: COMPLETAR
+source_timezone: null
+status_map: {}

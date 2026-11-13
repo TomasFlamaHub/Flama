@@ -1,0 +1,20 @@
+# Rappi Partners > Pagos > "Relación de ventas" (Excel con pestañas Índice, Resumen,
+# Detalle y Compensaciones, según la ayuda oficial de Rappi).
+# NO VERIFICADO: los nombres de columna se completan cuando tengamos un archivo real.
+# Hasta entonces este mapeo está desactivado (verified: false) y no carga nada.
+name: rappi_relacion_ventas_detalle
+platform: rappi
+dataset: orders_with_items
+verified: false
+file_glob: ["*relacion*venta*.xlsx", "*relación*venta*.xlsx"]
+read: {sheet: "Detalle", header_row: 0, decimal: ",", thousands: "."}
+columns:
+  order_id: COMPLETAR
+  store: COMPLETAR
+  created_at: COMPLETAR
+  status: COMPLETAR
+  gross_amount: COMPLETAR
+  discount_merchant: COMPLETAR
+  commission: COMPLETAR
+  payout_amount: COMPLETAR
+status_map: {}

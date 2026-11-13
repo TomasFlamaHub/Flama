@@ -1,0 +1,44 @@
+name: Corrida diaria - Centro de Control
+
+on:
+  schedule:
+    # 10:20 UTC = 07:20 hora de Chile en verano (CLST) / 06:20 en invierno (CLT).
+    - cron: "20 10 * * *"
+  workflow_dispatch:          # permite correrlo a mano desde GitHub
+    inputs:
+      date:
+        description: "Día comercial a analizar (AAAA-MM-DD). Vacío = ayer"
+        required: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      JUSTO_API_BASE: ${{ secrets.JUSTO_API_BASE }}
+      JUSTO_API_TOKEN: ${{ secrets.JUSTO_API_TOKEN }}
+      IMAP_HOST: ${{ secrets.IMAP_HOST }}
+      IMAP_USER: ${{ secrets.IMAP_USER }}
+      IMAP_PASSWORD: ${{ secrets.IMAP_PASSWORD }}
+      IMAP_ALLOWED_SENDERS: ${{ secrets.IMAP_ALLOWED_SENDERS }}
+      SMTP_HOST: ${{ secrets.SMTP_HOST }}
+      SMTP_USER: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+      DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pytest -q tests
+      - name: Carga, calidad, alertas, informe IA y email
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            python -m cci.cli daily --date "${{ github.event.inputs.date }}"
+          else
+            python -m cci.cli daily
+          fi

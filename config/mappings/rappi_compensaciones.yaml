@@ -1,0 +1,14 @@
+# Rappi Partners > Pagos > Relación de ventas, pestaña "Compensaciones" -> resarcimientos.
+# NO VERIFICADO (completar con archivo real).
+name: rappi_compensaciones
+platform: rappi
+dataset: adjustments
+verified: false
+file_glob: ["*relacion*venta*.xlsx"]
+read: {sheet: "Compensaciones", header_row: 0, decimal: ",", thousands: "."}
+columns:
+  date: COMPLETAR
+  store: COMPLETAR
+  order_id: COMPLETAR
+  amount: COMPLETAR
+  reason: COMPLETAR

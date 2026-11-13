@@ -1,0 +1,22 @@
+# Configuración del conector API de Justo. NO VERIFICADO.
+# Completar con la documentación v3 (docs.getjusto.com) o con soporte de Justo.
+# Este archivo NO tiene file_glob, así que el lector de archivos lo ignora.
+verified: false
+orders_path: "/COMPLETAR"            # endpoint que lista órdenes por rango de fechas
+items_path: "COMPLETAR"              # ruta dentro del JSON de respuesta a la lista de órdenes
+params: {from: "COMPLETAR", to: "COMPLETAR"}
+pagination: {param: "page", first_page: 1, page_size: 100}
+fields:
+  order:
+    order_id: "COMPLETAR"
+    store: "COMPLETAR"
+    created_at: "COMPLETAR"
+    status: "COMPLETAR"
+    gross_amount: "COMPLETAR"
+    discount_merchant: "COMPLETAR"
+  items_path: "COMPLETAR"
+  item:
+    product: "COMPLETAR"
+    quantity: "COMPLETAR"
+    gross_amount: "COMPLETAR"
+status_map: {}

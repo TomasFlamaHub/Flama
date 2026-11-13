@@ -1,0 +1,12 @@
+name: plantilla_items
+platform: from_column
+dataset: order_items
+verified: true
+file_glob: ["plantilla_items*.csv", "plantilla_items*.xlsx"]
+read: {sep: ",", decimal: "."}
+columns:
+  platform: plataforma
+  order_id: id_orden
+  product: producto
+  quantity: cantidad
+  gross_amount: monto

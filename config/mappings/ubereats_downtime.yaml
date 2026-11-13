@@ -1,0 +1,13 @@
+# Uber Eats Manager: informe de tiempo de inactividad ("Downtime": minutos que la tienda
+# pudo estar en línea vs. minutos fuera de línea, por hora). NO VERIFICADO.
+name: ubereats_downtime
+platform: ubereats
+dataset: store_day
+verified: false
+file_glob: ["*downtime*.csv"]
+read: {sep: ","}
+columns:
+  store: COMPLETAR
+  date: COMPLETAR
+  scheduled_minutes: COMPLETAR
+  offline_minutes: COMPLETAR

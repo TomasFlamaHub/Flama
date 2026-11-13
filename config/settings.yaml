@@ -1,0 +1,85 @@
+# =====================================================================
+#  CENTRO DE CONTROL COMERCIAL - CONFIGURACIÓN PRINCIPAL
+#  Todo lo que dice COMPLETAR debe llenarse con datos reales del negocio.
+# =====================================================================
+
+business:
+  name: "Mi Negocio"                 # COMPLETAR
+  timezone: "America/Santiago"
+  currency: "CLP"
+  # Hora de corte del día comercial. Un pedido de las 00:40 cuenta para el día
+  # anterior si el corte es a las 05:00. Así la comparación "lunes vs lunes" es homogénea.
+  business_day_cutoff_hour: 5
+  # Qué número se usa como "venta" principal en tarjetas y alertas:
+  #   gross = venta bruta (precio de menú, antes de descuentos)
+  #   net   = venta neta (bruta - descuentos financiados por el local)
+  headline_sales: gross
+
+# Las 6 sucursales. El id es interno y no debe cambiar nunca.
+branches:
+  - {id: S1, name: "Sucursal 1", aliases: []}   # COMPLETAR nombres reales y alias
+  - {id: S2, name: "Sucursal 2", aliases: []}
+  - {id: S3, name: "Sucursal 3", aliases: []}
+  - {id: S4, name: "Sucursal 4", aliases: []}
+  - {id: S5, name: "Sucursal 5", aliases: []}
+  - {id: S6, name: "Sucursal 6", aliases: []}
+
+platforms:
+  justo:
+    name: "Justo"
+    # Comisión contractual (0.05 = 5%). Solo se usa si el reporte NO trae la comisión
+    # real; en ese caso la liquidación queda marcada como ESTIMADA. null = no estimar.
+    commission_rate: null             # COMPLETAR
+    sessions_definition: "COMPLETAR: fuente y definición de visitas (p.ej. GA4 sesiones en tienda Justo)"
+  rappi:
+    name: "Rappi"
+    commission_rate: null             # COMPLETAR
+    sessions_definition: "COMPLETAR: definición de 'visitas/sesiones' según el portal Rappi Partners"
+  ubereats:
+    name: "Uber Eats"
+    commission_rate: null             # COMPLETAR
+    sessions_definition: "COMPLETAR: definición según Uber Eats Manager"
+
+# Cómo se identifica cada sucursal dentro de cada plataforma (ID de tienda externo).
+# Una fila por sucursal x plataforma. Sin esto, las órdenes no se pueden asignar.
+store_mapping:
+  - {platform: justo,    external_store_id: "COMPLETAR", branch_id: S1}
+  # ... repetir para S1..S6 en justo, rappi y ubereats
+
+# Objetivos de venta (opcionales). Si no hay objetivo, la alerta de run rate
+# compara contra la venta real de la semana/mes anterior.
+targets:
+  weekly: {}    # ejemplo: {S1: 4500000, S2: 3800000}
+  monthly: {}
+
+run_rate:
+  history_weeks: 8          # semanas completas usadas para el patrón por día de semana
+  min_weeks_for_pattern: 3  # con menos historia se usa proyección lineal (y se avisa)
+
+alerts:
+  baseline_weeks: 4                  # "promedio" = mismo día de semana, últimas 4 semanas
+  min_daily_sales_for_alert: 50000   # no alertar sobre bases diminutas (CLP)
+  min_sessions_for_conversion: 50
+  ticket_cv: 0.5                     # variabilidad típica del ticket (para filtrar ruido)
+  sales_drop:        {red: -0.25, yellow: -0.12, green: 0.15}
+  sessions_drop:     {red: -0.25, yellow: -0.12}
+  conversion_drop:   {red: -0.20, yellow: -0.10}
+  ticket_drop:       {red: -0.15, yellow: -0.08}
+  availability:      {red: 0.85, yellow: 0.95}   # open_time / horario programado
+  refunds_rate:      {red_multiple: 2.0, yellow_multiple: 1.5, red_abs: 0.03, min_amount: 15000}
+  cancel_rate:       {red_multiple: 2.0, yellow_multiple: 1.5, red_abs: 0.05, min_orders: 3}
+  platform_wtd:      {red: -0.15, yellow: -0.08, green: 0.10}
+  run_rate_vs_goal:  {red: 0.90, yellow: 0.97, green: 1.05}
+  product_missing:   {top_n: 10, min_avg_units: 2, red_avg_units: 5}
+  mix_change_pp: 0.02   # cambio de participación >= 2 puntos porcentuales
+
+notifications:
+  email:
+    enabled: false
+    to: []          # COMPLETAR destinatarios
+    send_levels: [ROJO, AMARILLO]
+
+ai:
+  model: "claude-opus-5-5"
+  report_effort: "high"
+  chat_effort: "medium"

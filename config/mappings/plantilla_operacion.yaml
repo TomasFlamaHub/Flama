@@ -1,0 +1,14 @@
+name: plantilla_operacion
+platform: from_column
+dataset: store_day
+verified: true
+file_glob: ["plantilla_operacion*.csv", "plantilla_operacion*.xlsx"]
+read: {sep: ",", decimal: ".", dayfirst: false}
+date_format: "%Y-%m-%d"
+columns:
+  platform: plataforma
+  date: fecha
+  store: tienda
+  scheduled_minutes: minutos_programados
+  open_minutes: minutos_abierto
+  sessions: sesiones

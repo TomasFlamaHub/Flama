@@ -1,0 +1,15 @@
+name: plantilla_resarcimientos
+platform: from_column
+dataset: adjustments
+verified: true
+file_glob: ["plantilla_resarcimientos*.csv", "plantilla_resarcimientos*.xlsx"]
+read: {sep: ",", decimal: ".", dayfirst: false}
+date_format: "%Y-%m-%d"
+columns:
+  platform: plataforma
+  date: fecha
+  store: tienda
+  order_id: id_orden
+  amount: monto
+  kind: tipo                    # resarcimiento | reembolso | contracargo
+  reason: motivo
