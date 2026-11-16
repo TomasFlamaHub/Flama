@@ -50,6 +50,10 @@ platforms:
 
 # Cómo se identifica cada sucursal dentro de cada plataforma (ID de tienda externo).
 # Una fila por sucursal x plataforma. Sin esto, las órdenes no se pueden asignar.
+# Portales (referencia):
+#   Uber Eats Manager: https://merchants.ubereats.com/manager/stores
+#   Rappi Partners:    https://restaurantes.rappi.com  (una tienda conocida: storeId CL900114436 -> ¿qué sucursal Kobo?)
+#   Justo admin:       https://admin.getjusto.com
 store_mapping:
   - {platform: justo,    external_store_id: "COMPLETAR", branch_id: KOBO1}
   # ... repetir para KOBO1..KOBO6 en justo, rappi y ubereats, y CRUST1..CRUST2 en ubereats
