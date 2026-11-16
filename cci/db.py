@@ -137,6 +137,51 @@ funnel_period = Table(  # embudo de conversión por período (las plataformas no
     Column("run_id", String(40)),
 )
 
+period_summary = Table(  # totales por tienda y período (ranking de tiendas del portal)
+    "period_summary", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("branch_id", String(16), primary_key=True),
+    Column("start_date", Date, primary_key=True),
+    Column("end_date", Date, primary_key=True),
+    Column("sales", Float), Column("orders", Float), Column("items", Float),
+    Column("sales_delta_pct", Float),
+    Column("source", String(300)), Column("run_id", String(40)),
+)
+
+weekly_summary = Table(  # venta semanal por tienda (resumen del portal, sin detalle por pedido)
+    "weekly_summary", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("branch_id", String(16), primary_key=True),
+    Column("week_start", Date, primary_key=True),
+    Column("sales", Float), Column("orders", Float),
+    Column("sales_delivery", Float), Column("sales_pickup", Float),
+    Column("source", String(300)), Column("run_id", String(40)),
+)
+
+product_period = Table(  # ranking de productos por período (resumen del portal)
+    "product_period", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("branch_id", String(16), primary_key=True),
+    Column("start_date", Date, primary_key=True),
+    Column("end_date", Date, primary_key=True),
+    Column("product", String(300), primary_key=True),
+    Column("sales", Float), Column("units", Float),
+    Column("sales_delta_pct", Float), Column("units_delta_pct", Float),
+    Column("source", String(300)), Column("run_id", String(40)),
+)
+
+hourly_period = Table(  # ventas por día de semana x hora acumuladas en un período
+    "hourly_period", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("branch_id", String(16), primary_key=True),
+    Column("start_date", Date, primary_key=True),
+    Column("end_date", Date, primary_key=True),
+    Column("dow", Integer, primary_key=True),     # 0 = lunes
+    Column("hour", Integer, primary_key=True),
+    Column("sales", Float), Column("orders", Float),
+    Column("source", String(300)), Column("run_id", String(40)),
+)
+
 quality_events = Table(  # reclamos, errores de pedido, cancelaciones con motivo
     "quality_events", metadata,
     Column("platform_id", String(16), primary_key=True),

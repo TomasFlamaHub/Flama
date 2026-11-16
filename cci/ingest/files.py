@@ -167,7 +167,13 @@ def ingest_inbox(inbox: Path | None = None, processed: Path | None = None, is_de
     processed = processed or config.DATA_DIR / "processed"
     mappings = load_mappings()
     summary = []
-    for path in sorted(p for p in inbox.iterdir() if p.is_file() and not p.name.startswith(".")):
+    order = {name: i for i, (name, _, _) in enumerate(native_parsers())}
+
+    def _prio(p):
+        m = match_parser(p)
+        return (order.get(m[0], 99) if m else 100, p.name)
+
+    for path in sorted((p for p in inbox.iterdir() if p.is_file() and not p.name.startswith(".")), key=_prio):
         h = file_hash(path)
         if already_loaded(h):
             summary.append({"file": path.name, "status": "skipped (ya cargado)"})

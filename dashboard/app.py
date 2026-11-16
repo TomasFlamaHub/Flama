@@ -395,6 +395,37 @@ def entity_view(by: str, names: dict, page_title: str):
     return t
 
 
+
+def uber_weekly_section():
+    """Tendencia semanal de Uber por tienda (resumen del portal; no requiere detalle por pedido)."""
+    w = sql("SELECT branch_id, week_start, sales, orders FROM weekly_summary WHERE platform_id='ubereats' ORDER BY week_start")
+    if w.empty:
+        return
+    w["week_start"] = pd.to_datetime(w["week_start"])
+    w = w[w["week_start"] <= pd.Timestamp(D)]
+    allk = f"ALL_{BRAND}" if BRAND else None
+    pv = w.pivot(index="week_start", columns="branch_id", values="sales")
+    stores = [c for c in pv.columns if c in BN and c in SB]
+    if allk in pv.columns:
+        known = [c for c in pv.columns if not c.startswith("ALL_")]
+        rest = [b for b in BN if b not in known and BRAND and "ubereats" in BRANDS[BRAND]["platforms"]]
+        if rest and not sel_b:
+            pv["_rest"] = pv[allk] - pv[known].sum(axis=1)
+            stores.append("_rest")
+    if not stores:
+        return
+    st.markdown("##### Uber Eats · venta semanal por tienda (resumen del portal)")
+    fig = go.Figure()
+    rest_names = " + ".join(BN[b] for b in BN if b not in pv.columns and b != "_rest")
+    for i, c in enumerate(stores):
+        name = BN.get(c, f"{rest_names} (por diferencia)")
+        fig.add_scatter(x=pv.index, y=pv[c], name=name, mode="lines+markers",
+                        line=dict(color=BRANCH_COLOR[i % len(BRANCH_COLOR)], width=2), marker=dict(size=7))
+    st.plotly_chart(chart_layout(fig, 330), use_container_width=True, theme="streamlit")
+    st.caption("Semanas de lunes a domingo. Fuente: Uber Eats Manager › Ventas (CSV por tienda). Las tiendas sin archivo "
+               "propio se muestran juntas, calculadas como total − tiendas conocidas. La semana del 14/09 incluye "
+               "el cierre por Fiestas Patrias.")
+
 def page_sucursales():
     t = entity_view("branch_id", BN, "Sucursales")
     if t is None or t.empty:
@@ -422,6 +453,10 @@ def page_sucursales():
         fig.update_layout(barmode="stack", bargap=0.25,
                           title=dict(text=f"{BN[sel]} · venta diaria por plataforma (28 días)", font=dict(size=14)))
         st.plotly_chart(chart_layout(fig, 280), use_container_width=True, theme="streamlit")
+
+
+def _sucursales_extra():
+    uber_weekly_section()
 
 
 def page_plataformas():
@@ -588,6 +623,62 @@ def comparison_table(rows: list[tuple[str, dict]], proj: pd.Series | None):
         out.append(r)
     st.dataframe(pd.DataFrame(out), hide_index=True, use_container_width=True)
 
+
+
+def uber_product_section():
+    pp = sql("SELECT product, sales, units, sales_delta_pct, units_delta_pct, start_date, end_date FROM product_period "
+             "WHERE platform_id='ubereats' ORDER BY sales DESC")
+    if pp.empty or (BRAND and BRAND != "kobo"):
+        return
+    st.markdown("---\n##### Uber Eats · ranking de productos (resumen del portal, 6 tiendas)")
+    st.caption(f"Período {pd.to_datetime(pp['start_date'].iloc[0]):%d/%m} – {pd.to_datetime(pp['end_date'].iloc[0]):%d/%m/%Y}; "
+               "variación vs el período anterior de igual duración, según Uber.")
+    pp["share"] = pp["sales"] / pp["sales"].sum() * 100
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        top = pp.head(15).iloc[::-1]
+        fig = go.Figure(go.Bar(x=top["sales"], y=top["product"], orientation="h", marker=dict(color=PLAT_COLOR["ubereats"],
+                               cornerradius=4), customdata=top[["share", "sales_delta_pct"]],
+                               hovertemplate="%{y}<br>Venta %{x:,.0f}<br>Participación %{customdata[0]:.1f}%"
+                                             "<br>Δ %{customdata[1]:+.1f}%<extra></extra>"))
+        st.plotly_chart(chart_layout(fig, 430, False), use_container_width=True, theme="streamlit")
+    with c2:
+        mv = pp[pp["sales"] > pp["sales"].quantile(0.75)].dropna(subset=["sales_delta_pct"])
+        st.markdown("Productos relevantes que más cambiaron")
+        mv = mv.reindex(mv["sales_delta_pct"].abs().sort_values(ascending=False).index).head(10)
+        st.dataframe(pd.DataFrame({"Producto": mv["product"], "Δ venta %": mv["sales_delta_pct"],
+                                   "Partic. %": mv["share"]}), hide_index=True, use_container_width=True,
+                     column_config={"Δ venta %": st.column_config.NumberColumn(format="%+.1f%%"),
+                                    "Partic. %": st.column_config.NumberColumn(format="%.1f%%")})
+    with st.expander("Ranking completo Uber"):
+        st.dataframe(pd.DataFrame({"Producto": pp["product"], "Venta": pp["sales"], "Unidades": pp["units"],
+                                   "Participación %": pp["share"], "Δ venta %": pp["sales_delta_pct"]}),
+                     hide_index=True, use_container_width=True,
+                     column_config={"Venta": st.column_config.NumberColumn(format="localized"),
+                                    "Participación %": st.column_config.NumberColumn(format="%.1f%%"),
+                                    "Δ venta %": st.column_config.NumberColumn(format="%+.1f%%")})
+
+
+def hourly_section():
+    h = sql("SELECT dow, hour, sales, orders, start_date, end_date FROM hourly_period WHERE platform_id='ubereats'")
+    if h.empty or (BRAND and BRAND != "kobo"):
+        return
+    st.markdown("##### Uber Eats · ¿cuándo se vende? (día × hora, 6 tiendas)")
+    pv = h.pivot_table(index="dow", columns="hour", values="sales", aggfunc="sum").reindex(range(7))
+    pv = pv.reindex(columns=range(int(h["hour"].min()), 24)).fillna(0)
+    labels = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+    fig = go.Figure(go.Heatmap(z=pv.values / 1e6, x=[f"{c}h" for c in pv.columns], y=labels,
+                               colorscale=[[0, "#f0efec"], [0.15, "#cde2fb"], [0.5, "#3987e5"], [1, "#104281"]],
+                               xgap=2, ygap=2, colorbar=dict(title="$ M"),
+                               hovertemplate="%{y} %{x}: $%{z:.1f} M<extra></extra>"))
+    fig.update_yaxes(autorange="reversed")
+    st.plotly_chart(chart_layout(fig, 300, False), use_container_width=True, theme="streamlit")
+    tot = h["sales"].sum()
+    din = h[h["hour"] >= 19]["sales"].sum() / tot
+    lun = h[(h["hour"] >= 12) & (h["hour"] <= 16)]["sales"].sum() / tot
+    st.caption(f"Cena (19–23 h): {din * 100:.0f}% de la venta · almuerzo (12–16 h): {lun * 100:.0f}% · "
+               f"17–18 h casi sin venta · domingo prácticamente cerrado. Acumulado "
+               f"{pd.to_datetime(h['start_date'].iloc[0]):%d/%m} – {pd.to_datetime(h['end_date'].iloc[0]):%d/%m}.")
 
 def page_semanal():
     header("Análisis semanal", f"semana {P.week_start:%d/%m} – {P.week_full[1]:%d/%m}")
@@ -874,10 +965,10 @@ def page_cargar():
 
 pages = [
     st.Page(page_resumen, title="Resumen ejecutivo", icon="🏠", url_path="resumen", default=True),
-    st.Page(page_sucursales, title="Sucursales", icon="🏪", url_path="sucursales"),
+    st.Page(lambda: (page_sucursales(), _sucursales_extra()), title="Sucursales", icon="🏪", url_path="sucursales"),
     st.Page(page_plataformas, title="Plataformas", icon="📱", url_path="plataformas"),
-    st.Page(page_mix, title="Mix de productos", icon="🍔", url_path="mix"),
-    st.Page(page_semanal, title="Análisis semanal", icon="📅", url_path="semanal"),
+    st.Page(lambda: (page_mix(), uber_product_section()), title="Mix de productos", icon="🍔", url_path="mix"),
+    st.Page(lambda: (page_semanal(), hourly_section()), title="Análisis semanal", icon="📅", url_path="semanal"),
     st.Page(page_mensual, title="Análisis mensual", icon="🗓️", url_path="mensual"),
     st.Page(page_rentabilidad, title="Rentabilidad y calidad", icon="💰", url_path="rentabilidad"),
     st.Page(page_alertas, title="Alertas", icon="🚨", url_path="alertas"),
