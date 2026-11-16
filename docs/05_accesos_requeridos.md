@@ -5,8 +5,9 @@ Ordenado por prioridad. Las credenciales **no** se mandan por chat ni por email:
 
 ## A. Datos del negocio (para `config/settings.yaml`)
 
-- [ ] Nombre real de las 6 sucursales (y cómo aparece cada una en cada plataforma).
-- [ ] **ID o nombre de tienda** de cada sucursal en Justo, Rappi y Uber Eats (18 combinaciones).
+- [x] Marcas: **Kobo** (6 tiendas en Justo, Rappi y Uber Eats) y **The Crust** (2 tiendas, solo Uber Eats). Ya configurado.
+- [ ] Nombre real de las 8 tiendas (6 Kobo + 2 The Crust) y cómo aparece cada una en cada plataforma.
+- [ ] **ID o nombre de tienda** en cada plataforma: Kobo 6×3 = 18 combinaciones + The Crust 2 en Uber = **20 en total**.
 - [ ] Horario de apertura de cada sucursal (para medir disponibilidad).
 - [ ] Hora de corte del día comercial (¿a qué hora cierra el último local?).
 - [ ] ¿La "venta" principal es la bruta o la neta?
@@ -15,6 +16,11 @@ Ordenado por prioridad. Las credenciales **no** se mandan por chat ni por email:
 - [ ] Lista de productos con categoría (opcional; ayuda a unificar nombres entre plataformas).
 
 ## B. Archivos de ejemplo (lo más importante para avanzar)
+
+> Cómo obtenerlos: Claude en Chrome actúa sobre tu navegador local, por lo que solo funciona en una
+> sesión de Claude abierta en tu computador (app de escritorio o claude.ai en Chrome con la extensión),
+> no en una sesión en la nube. Desde esa sesión Claude puede descargar los reportes de Rappi Partners y
+> Uber Eats Manager por vos; o los descargás vos y los subís en la pantalla "Cargar reportes" o en el chat.
 
 Necesito **un ejemplo real de cada reporte** (puede ser de 1 día y de una sola sucursal) para
 configurar su lectura. Con eso activo los mapeos que hoy están en "pendiente":

@@ -15,14 +15,22 @@ business:
   #   net   = venta neta (bruta - descuentos financiados por el local)
   headline_sales: gross
 
-# Las 6 sucursales. El id es interno y no debe cambiar nunca.
+# Marcas. Cada marca se analiza por separado (filtro "Marca" del panel, informe y alertas propios).
+brands:
+  - {id: kobo,  name: "Kobo",      platforms: [justo, rappi, ubereats]}
+  - {id: crust, name: "The Crust", platforms: [ubereats]}
+
+# Sucursales (tiendas). El id es interno y no debe cambiar nunca.
+# COMPLETAR los nombres reales y, en aliases, cómo aparece cada tienda en los reportes.
 branches:
-  - {id: S1, name: "Sucursal 1", aliases: []}   # COMPLETAR nombres reales y alias
-  - {id: S2, name: "Sucursal 2", aliases: []}
-  - {id: S3, name: "Sucursal 3", aliases: []}
-  - {id: S4, name: "Sucursal 4", aliases: []}
-  - {id: S5, name: "Sucursal 5", aliases: []}
-  - {id: S6, name: "Sucursal 6", aliases: []}
+  - {id: KOBO1,  brand: kobo,  name: "Kobo 1",      aliases: []}
+  - {id: KOBO2,  brand: kobo,  name: "Kobo 2",      aliases: []}
+  - {id: KOBO3,  brand: kobo,  name: "Kobo 3",      aliases: []}
+  - {id: KOBO4,  brand: kobo,  name: "Kobo 4",      aliases: []}
+  - {id: KOBO5,  brand: kobo,  name: "Kobo 5",      aliases: []}
+  - {id: KOBO6,  brand: kobo,  name: "Kobo 6",      aliases: []}
+  - {id: CRUST1, brand: crust, name: "The Crust 1", aliases: []}
+  - {id: CRUST2, brand: crust, name: "The Crust 2", aliases: []}
 
 platforms:
   justo:
@@ -43,13 +51,13 @@ platforms:
 # Cómo se identifica cada sucursal dentro de cada plataforma (ID de tienda externo).
 # Una fila por sucursal x plataforma. Sin esto, las órdenes no se pueden asignar.
 store_mapping:
-  - {platform: justo,    external_store_id: "COMPLETAR", branch_id: S1}
-  # ... repetir para S1..S6 en justo, rappi y ubereats
+  - {platform: justo,    external_store_id: "COMPLETAR", branch_id: KOBO1}
+  # ... repetir para KOBO1..KOBO6 en justo, rappi y ubereats, y CRUST1..CRUST2 en ubereats
 
 # Objetivos de venta (opcionales). Si no hay objetivo, la alerta de run rate
 # compara contra la venta real de la semana/mes anterior.
 targets:
-  weekly: {}    # ejemplo: {S1: 4500000, S2: 3800000}
+  weekly: {}    # ejemplo: {KOBO1: 4500000, CRUST1: 2500000}
   monthly: {}
 
 run_rate:

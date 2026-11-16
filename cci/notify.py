@@ -11,7 +11,8 @@ from . import config
 ICON = {"ROJO": "🔴", "AMARILLO": "🟡", "VERDE": "🟢"}
 
 
-def build_email(D, alerts: list[dict], report_md: str | None, demo: bool) -> tuple[str, str]:
+def build_email(D, alerts: list[dict], reports: dict[str, str], demo: bool) -> tuple[str, str]:
+    """reports = {brand_id: informe_md}. Una sección por marca."""
     cfg = config.settings()
     levels = set(cfg["notifications"]["email"].get("send_levels", ["ROJO", "AMARILLO"]))
     reds = sum(a["level"] == "ROJO" for a in alerts)
@@ -22,15 +23,16 @@ def build_email(D, alerts: list[dict], report_md: str | None, demo: bool) -> tup
     url = os.environ.get("DASHBOARD_URL")
     if url:
         lines.append(f'<p><a href="{url}">Abrir el panel</a></p>')
-    lines.append("<h3>Alertas</h3><ul>")
-    for a in alerts:
-        if a["level"] in levels:
-            lines.append(f"<li>{ICON[a['level']]} <b>{a['title']}</b> — {a['what']}<br>"
-                         f"<i>Acción:</i> {a['recommendation']}</li>")
-    lines.append("</ul>")
-    if report_md:
-        lines.append("<h3>Informe del analista</h3><pre style='white-space:pre-wrap;font-family:inherit'>"
-                     + report_md.replace("<", "&lt;") + "</pre>")
+    for bid, b in config.brands().items():
+        lines.append(f"<h2>{b['name']}</h2><h3>Alertas</h3><ul>")
+        for a in alerts:
+            if a["level"] in levels and a.get("brand_id") == bid:
+                lines.append(f"<li>{ICON[a['level']]} <b>{a['title']}</b> — {a['what']}<br>"
+                             f"<i>Acción:</i> {a['recommendation']}</li>")
+        lines.append("</ul>")
+        if reports.get(bid):
+            lines.append("<h3>Informe del analista</h3><pre style='white-space:pre-wrap;font-family:inherit'>"
+                         + reports[bid].replace("<", "&lt;") + "</pre>")
     return subject, "\n".join(lines)
 
 

@@ -26,7 +26,7 @@ ADDITIVE = ["gross", "net", "payout", "commission", "orders", "cancelled_orders"
 
 # --------------------------------------------------------------------------- carga
 def load_panel(start: date, end: date, branches: list[str] | None = None,
-               platforms: list[str] | None = None) -> pd.DataFrame:
+               platforms: list[str] | None = None, brand: str | None = None) -> pd.DataFrame:
     """Panel diario sucursal x plataforma con todas las métricas aditivas."""
     p = {"s": start.isoformat(), "e": end.isoformat()}
     o = db.read_df("""
@@ -60,10 +60,14 @@ def load_panel(start: date, end: date, branches: list[str] | None = None,
     has_s = panel["sessions"].notna() & (panel["sessions"] > 0)
     panel["orders_s"] = np.where(has_s, panel["orders"], 0.0)
     panel["sales_s"] = np.where(has_s, panel["gross"], 0.0)
+    if brand:
+        allowed = set(config.branches_of(brand))
+        branches = [b for b in branches if b in allowed] if branches else sorted(allowed)
     if branches:
         panel = panel[panel["branch_id"].isin(branches)]
     if platforms:
         panel = panel[panel["platform_id"].isin(platforms)]
+    panel = panel.assign(brand_id=panel["branch_id"].map(config.brand_of))
     return panel.reset_index(drop=True)
 
 

@@ -40,3 +40,24 @@ def branch_names() -> dict[str, str]:
 
 def platform_names() -> dict[str, str]:
     return {k: v["name"] for k, v in settings()["platforms"].items()}
+
+
+def brands() -> dict[str, dict]:
+    """{brand_id: {name, platforms}}. Sin marcas configuradas = una marca única."""
+    bs = settings().get("brands") or [{"id": "default", "name": settings()["business"]["name"],
+                                        "platforms": list(PLATFORMS)}]
+    return {b["id"]: b for b in bs}
+
+
+def brand_of(branch_id: str | None) -> str | None:
+    if branch_id is None:
+        return None
+    for b in settings()["branches"]:
+        if b["id"] == branch_id:
+            return b.get("brand", next(iter(brands())))
+    return None
+
+
+def branches_of(brand_id: str | None) -> list[str]:
+    return [b["id"] for b in settings()["branches"]
+            if brand_id is None or b.get("brand", next(iter(brands()))) == brand_id]

@@ -49,15 +49,16 @@ def cmd_daily(D: date | None, skip_ai: bool) -> None:
     al = alerts.generate(D)
     print(f"3/5 Alertas: {sum(a['level'] == 'ROJO' for a in al)} rojas, "
           f"{sum(a['level'] == 'AMARILLO' for a in al)} amarillas, {sum(a['level'] == 'VERDE' for a in al)} verdes")
-    report = None
+    reports = {}
     if not skip_ai:
-        try:
-            from . import analyst
-            report = analyst.daily_report(D)
-            print("4/5 Informe IA generado")
-        except Exception as exc:
-            print(f"4/5 Informe IA no generado: {exc}")
-    sent = notify.send_email(*notify.build_email(D, al, report, kpis.is_demo_data()))
+        from . import analyst, config
+        for bid in config.brands():
+            try:
+                reports[bid] = analyst.daily_report(D, bid)
+                print(f"4/5 Informe IA generado: {bid}")
+            except Exception as exc:
+                print(f"4/5 Informe IA no generado ({bid}): {exc}")
+    sent = notify.send_email(*notify.build_email(D, al, reports, kpis.is_demo_data()))
     print("5/5 Email enviado" if sent else "5/5 Email no configurado/omitido")
 
 
@@ -68,11 +69,11 @@ def main(argv=None) -> int:
     d = sub.add_parser("daily"); d.add_argument("--date"); d.add_argument("--skip-ai", action="store_true")
     sub.add_parser("ingest")
     a = sub.add_parser("alerts"); a.add_argument("--date")
-    r = sub.add_parser("report"); r.add_argument("--date")
+    r = sub.add_parser("report"); r.add_argument("--date"); r.add_argument("--brand")
     q = sub.add_parser("ask"); q.add_argument("question")
     p = sub.add_parser("profile"); p.add_argument("path"); p.add_argument("--sheet")
     dm = sub.add_parser("demo"); dm.add_argument("--purge", action="store_true"); dm.add_argument("--end")
-    fp = sub.add_parser("factpack"); fp.add_argument("--date")
+    fp = sub.add_parser("factpack"); fp.add_argument("--date"); fp.add_argument("--brand")
     args = ap.parse_args(argv)
 
     if args.cmd != "profile":
@@ -90,7 +91,7 @@ def main(argv=None) -> int:
             print(f"[{x['level']}] {x['title']} | {x['magnitude']} | vs {x['comparison']}")
     elif args.cmd == "report":
         from . import analyst
-        print(analyst.daily_report(_date(args.date)))
+        print(analyst.daily_report(_date(args.date), args.brand))
     elif args.cmd == "ask":
         from . import analyst
         print(analyst.ask(args.question)[0])
@@ -109,7 +110,7 @@ def main(argv=None) -> int:
             print(f"Alertas demo {D}: {len(alerts.generate(D))}")
     elif args.cmd == "factpack":
         from . import factpack
-        print(json.dumps(factpack.build(_date(args.date)), ensure_ascii=False, indent=1, default=str))
+        print(json.dumps(factpack.build(_date(args.date), args.brand), ensure_ascii=False, indent=1, default=str))
     return 0
 
 

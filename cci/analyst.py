@@ -15,8 +15,8 @@ import anthropic
 
 from . import config, db, factpack, kpis
 
-SYSTEM = """Sos el analista comercial senior de una cadena gastronómica de 6 sucursales que vende por \
-Justo, Rappi y Uber Eats. Escribís en español, para el dueño, que necesita entender el negocio en menos de 5 minutos.
+SYSTEM = """Sos el analista comercial senior de un grupo gastronómico con dos marcas que se analizan por \
+separado: Kobo (6 tiendas en Justo, Rappi y Uber Eats) y The Crust (2 tiendas, solo Uber Eats). Escribís en español, para el dueño, que necesita entender el negocio en menos de 5 minutos.
 
 Reglas estrictas:
 - Usá SOLO cifras presentes en los datos entregados o devueltas por las herramientas. Nunca inventes ni \
@@ -33,7 +33,8 @@ como si fueran idénticas sin advertirlo.
 - Montos en pesos con separador de miles (ej. $1.234.567). Porcentajes con un decimal.
 - Sé concreto y accionable. Nada de relleno."""
 
-REPORT_PROMPT = """Con el siguiente paquete de datos del día, escribí el INFORME EJECUTIVO DIARIO en Markdown \
+REPORT_PROMPT = """Con el siguiente paquete de datos del día, escribí el INFORME EJECUTIVO DIARIO de la marca indicada en \
+el campo "marca", en Markdown \
 con estas secciones, en este orden y breves:
 
 1. **Resumen del negocio** (3-4 frases: venta de ayer, semana acumulada vs semana anterior, proyección \
@@ -59,7 +60,8 @@ TOOLS = [
                     "tablas por sucursal y plataforma, descomposición sesiones x conversión x ticket, mix de "
                     "productos, alertas y calidad de datos. Usala primero para cualquier pregunta general.",
      "input_schema": {"type": "object", "properties": {
-         "date": {"type": "string", "description": "AAAA-MM-DD. Por defecto el último día con datos."}},
+         "date": {"type": "string", "description": "AAAA-MM-DD. Por defecto el último día con datos."},
+         "brand": {"type": "string", "description": "id de marca (kobo, crust). Omitir = todas."}},
          "required": [], "additionalProperties": False}},
     {"name": "compare_periods",
      "description": "Compara dos rangos de fechas arbitrarios, agrupando por sucursal o plataforma. "
@@ -68,7 +70,8 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {
          "current_start": {"type": "string"}, "current_end": {"type": "string"},
          "base_start": {"type": "string"}, "base_end": {"type": "string"},
-         "group_by": {"type": "string", "enum": ["branch_id", "platform_id"]},
+         "group_by": {"type": "string", "enum": ["branch_id", "platform_id", "brand_id"]},
+         "brand": {"type": "string"},
          "branches": {"type": "array", "items": {"type": "string"}},
          "platforms": {"type": "array", "items": {"type": "string"}}},
          "required": ["current_start", "current_end", "base_start", "base_end", "group_by"],
@@ -104,7 +107,11 @@ def _context() -> str:
     bn = config.branch_names()
     pn = config.platform_names()
     _, last = kpis.data_bounds()
-    return (f"Sucursales (id: nombre): {json.dumps(bn, ensure_ascii=False)}. Plataformas: "
+    marcas = {k: {"nombre": v["name"], "plataformas": v["platforms"], "sucursales": config.branches_of(k)}
+              for k, v in config.brands().items()}
+    return (f"Marcas: {json.dumps(marcas, ensure_ascii=False)}. Si la pregunta no indica marca y la "
+            f"respuesta difiere por marca, separala por marca. "
+            f"Sucursales (id: nombre): {json.dumps(bn, ensure_ascii=False)}. Plataformas: "
             f"{json.dumps(pn, ensure_ascii=False)}. Último día con datos: {last}. "
             f"Venta principal: {'bruta' if kpis.sales_col() == 'gross' else 'neta'}.")
 
@@ -113,10 +120,11 @@ def execute_tool(name: str, args: dict) -> str:
     try:
         if name == "get_daily_factpack":
             D = _d(args.get("date")) or kpis.data_bounds()[1]
-            return json.dumps(factpack.build(D), ensure_ascii=False, default=str)
+            return json.dumps(factpack.build(D, args.get("brand")), ensure_ascii=False, default=str)
         if name == "compare_periods":
             cs, ce, bs, be = (_d(args[k]) for k in ("current_start", "current_end", "base_start", "base_end"))
-            panel = kpis.load_panel(min(cs, bs), max(ce, be), args.get("branches"), args.get("platforms"))
+            panel = kpis.load_panel(min(cs, bs), max(ce, be), args.get("branches"), args.get("platforms"),
+                                    args.get("brand"))
             t = kpis.entity_table(panel, (cs, ce), (bs, be), args["group_by"])
             tot_c = kpis.summarize(kpis.filt(panel, cs, ce))
             tot_b = kpis.summarize(kpis.filt(panel, bs, be))
@@ -155,9 +163,9 @@ def _text(resp) -> str:
     return "\n".join(b.text for b in resp.content if b.type == "text").strip()
 
 
-def daily_report(D: date, persist: bool = True) -> str:
+def daily_report(D: date, brand: str | None = None, persist: bool = True) -> str:
     cfg = config.settings()["ai"]
-    data = factpack.build(D)
+    data = factpack.build(D, brand)
     client = _client()
     resp = _create(client, model=cfg["model"], max_tokens=16000, system=SYSTEM,
                    thinking={"type": "adaptive"}, output_config={"effort": cfg.get("report_effort", "high")},
@@ -167,8 +175,10 @@ def daily_report(D: date, persist: bool = True) -> str:
         raise RuntimeError("El modelo no generó el informe (refusal).")
     md = _text(resp)
     if persist:
-        db.execute("DELETE FROM ai_report WHERE business_date = :d", {"d": D.isoformat()})
-        db.insert_rows(db.ai_report, [{"business_date": D, "generated_at": db.now_utc(), "model": resp.model,
+        db.execute("DELETE FROM ai_report WHERE business_date = :d AND brand_id = :b",
+                   {"d": D.isoformat(), "b": brand})
+        db.insert_rows(db.ai_report, [{"business_date": D, "brand_id": brand, "generated_at": db.now_utc(),
+                                       "model": resp.model,
                                        "content_md": md, "is_demo": data["es_demo"]}])
     return md
 

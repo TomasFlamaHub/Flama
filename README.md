@@ -1,6 +1,6 @@
-# Centro de Control Comercial · 6 sucursales × Justo / Rappi / Uber Eats
+# Centro de Control Comercial · Kobo (6 tiendas: Justo, Rappi, Uber Eats) y The Crust (2 tiendas: Uber Eats)
 
-Sistema que todas las mañanas reúne las ventas y la operación de las tres plataformas, las consolida
+Cada marca se analiza por separado (selector "Marca" del panel, alertas e informe IA propios; también hay vista consolidada). Sistema que todas las mañanas reúne las ventas y la operación de las tres plataformas, las consolida
 por sucursal, detecta desvíos y deja listo un panel y un informe para entender el negocio en menos de
 5 minutos.
 

@@ -88,8 +88,9 @@ class AlertEngine:
                     s[k] = s[k] / n
         return s
 
-    def add(self, level, code, branch, platform, title, what, magnitude, comparison, rec):
+    def add(self, level, code, branch, platform, title, what, magnitude, comparison, rec, brand=None):
         self.alerts.append({"level": level, "code": code, "branch_id": branch, "platform_id": platform,
+                            "brand_id": brand or config.brand_of(branch),
                             "title": title, "what": what, "magnitude": magnitude, "comparison": comparison,
                             "recommendation": rec})
 
@@ -271,7 +272,8 @@ class AlertEngine:
     def rule_platform_wtd(self):
         P = kpis.Periods(self.D)
         th = self.cfg["platform_wtd"]
-        for p, sub in self.panel.groupby("platform_id"):
+        brand_names = {k: v["name"] for k, v in config.brands().items()}
+        for (br, p), sub in self.panel.groupby(["brand_id", "platform_id"]):
             c, b = kpis.summarize(kpis.filt(sub, *P.wtd)), kpis.summarize(kpis.filt(sub, *P.wtd_prev))
             d = kpis.pct(c["sales"], b["sales"])
             lvl = self._lvl_drop(d, th)
@@ -284,12 +286,13 @@ class AlertEngine:
                     s=_fmt_pct(dec["pct"]["sesiones"]), cv=_fmt_pct(dec["pct"]["conversion"]),
                     t=_fmt_pct(dec["pct"]["ticket"])))
             word = "crece" if lvl == "VERDE" else "cae"
-            self.add(lvl, "plataforma_semana", None, p, f"{self.pn.get(p)} {word} {_fmt_pct(d)} en la semana",
+            self.add(lvl, "plataforma_semana", None, p,
+                     f"{brand_names.get(br, br)} · {self.pn.get(p)} {word} {_fmt_pct(d)} en la semana",
                      f"Acumulado semana {_fmt_money(c['sales'])} vs {_fmt_money(b['sales'])} a la misma altura "
                      f"de la semana anterior.{expl}", _fmt_pct(d),
                      f"semana actual {P.wtd[0]}..{P.wtd[1]} vs {P.wtd_prev[0]}..{P.wtd_prev[1]}",
                      "Si cae: revisar disponibilidad, posicionamiento y promociones activas en esa plataforma. "
-                     "Si crece: evaluar mover inversión promocional hacia ella.")
+                     "Si crece: evaluar mover inversión promocional hacia ella.", brand=br)
 
     def rule_run_rate(self):
         P = kpis.Periods(self.D)

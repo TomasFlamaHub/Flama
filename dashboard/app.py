@@ -122,7 +122,7 @@ def sql(q: str, **params) -> pd.DataFrame:
 
 
 (dmin, dmax), DEMO = bounds()
-BN, PN = config.branch_names(), config.platform_names()
+BN_ALL, PN_ALL, BRANDS = config.branch_names(), config.platform_names(), config.brands()
 SALES_LABEL = "Venta bruta" if kpis.sales_col() == "gross" else "Venta neta"
 
 if dmax is None:
@@ -133,10 +133,18 @@ if dmax is None:
 
 # ------------------------------------------------------------------ filtros (barra lateral)
 with st.sidebar:
-    st.markdown(f"### {config.settings()['business']['name']}")
+    brand_opts = list(BRANDS) + (["__all__"] if len(BRANDS) > 1 else [])
+    brand_sel = st.radio("Marca", brand_opts, horizontal=True,
+                         format_func=lambda b: BRANDS[b]["name"] if b in BRANDS else "Todas")
+    BRAND = None if brand_sel == "__all__" else brand_sel
+    BRAND_NAME = BRANDS[BRAND]["name"] if BRAND else "Todas las marcas"
+    BN = {b: BN_ALL[b] for b in config.branches_of(BRAND)}
+    PN = {p: n for p, n in PN_ALL.items() if BRAND is None or p in BRANDS[BRAND]["platforms"]}
     D = st.date_input("Día analizado (cierre)", value=dmax, min_value=dmin, max_value=dmax, format="DD/MM/YYYY")
     sel_b = st.multiselect("Sucursales", list(BN), format_func=BN.get, placeholder="Todas")
-    sel_p = st.multiselect("Plataformas", list(PN), format_func=PN.get, placeholder="Todas")
+    sel_p = st.multiselect("Plataformas", list(PN), format_func=PN.get, placeholder="Todas") if len(PN) > 1 else []
+    if len(PN) == 1:
+        st.caption(f"Plataforma: {next(iter(PN.values()))}")
     st.caption(f"Datos disponibles: {dmin:%d/%m/%Y} – {dmax:%d/%m/%Y}")
     last_run = sql("SELECT MAX(finished_at) AS t FROM ingestion_run WHERE status IN ('ok','warning')")
     if not last_run.empty and pd.notna(last_run.loc[0, "t"]):
@@ -146,10 +154,13 @@ with st.sidebar:
         st.rerun()
 
 P = kpis.Periods(D)
-panel = panel_for(D, tuple(sel_b), tuple(sel_p))
+SB = sel_b or list(BN)   # sucursales en alcance (las de la marca si no se eligió ninguna)
+panel = panel_for(D, tuple(SB), tuple(sel_p))
 F = lambda a, b: kpis.summarize(kpis.filt(panel, a, b))  # noqa: E731
-scope = " · ".join(filter(None, [", ".join(BN[b] for b in sel_b) if sel_b else "6 sucursales",
-                                 ", ".join(PN[p] for p in sel_p) if sel_p else "3 plataformas"]))
+scope = " · ".join(filter(None, [BRAND_NAME,
+                                 ", ".join(BN[b] for b in sel_b) if sel_b else f"{len(BN)} sucursales",
+                                 ", ".join(PN[p] for p in sel_p) if sel_p else
+                                 (f"{len(PN)} plataformas" if len(PN) > 1 else next(iter(PN.values())))]))
 
 
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -182,8 +193,15 @@ def alert_cards(df: pd.DataFrame, limit: int | None = None):
             f'<small><b>Acción recomendada:</b> {r.recommendation}</small></div>', unsafe_allow_html=True)
 
 
+def ai_rep() -> pd.DataFrame:
+    r = sql("SELECT content_md, model, generated_at, brand_id FROM ai_report WHERE business_date = :d", d=D.isoformat())
+    return r[r["brand_id"].isna() if BRAND is None else (r["brand_id"] == BRAND)].reset_index(drop=True)
+
+
 def load_alerts() -> pd.DataFrame:
     a = sql("SELECT * FROM alert WHERE business_date = :d", d=D.isoformat())
+    if BRAND:
+        a = a[a["brand_id"].isna() | (a["brand_id"] == BRAND)]
     if sel_b:
         a = a[a["branch_id"].isna() | a["branch_id"].isin(sel_b)]
     if sel_p:
@@ -301,7 +319,7 @@ def page_resumen():
                     f"{LEVEL_ICON['AMARILLO']} {int((a.level == 'AMARILLO').sum())} "
                     f"{LEVEL_ICON['VERDE']} {int((a.level == 'VERDE').sum())}")
         alert_cards(a[a.level != "VERDE"], 6)
-        rep = sql("SELECT content_md, model, generated_at FROM ai_report WHERE business_date = :d", d=D.isoformat())
+        rep = ai_rep()
         with st.expander("🧠 Informe del analista IA", expanded=False):
             if rep.empty:
                 st.info("Aún no hay informe IA para este día (se genera en la corrida diaria).")
@@ -449,8 +467,8 @@ def page_mix():
     header("Mix de productos")
     opt = st.radio("Período", list(PERIOD_OPTS), horizontal=True, index=1)
     cur_r, base_r = PERIOD_OPTS[opt]()
-    cur = mix_for(*cur_r, tuple(sel_b), tuple(sel_p))
-    base = mix_for(*base_r, tuple(sel_b), tuple(sel_p))
+    cur = mix_for(*cur_r, tuple(SB), tuple(sel_p))
+    base = mix_for(*base_r, tuple(SB), tuple(sel_p))
     if cur.empty:
         st.info("No hay detalle de productos para este período/filtros.")
         return
@@ -649,7 +667,7 @@ def page_alertas():
 
 def page_ia():
     header("Analista IA")
-    rep = sql("SELECT content_md, model, generated_at FROM ai_report WHERE business_date = :d", d=D.isoformat())
+    rep = ai_rep()
     has_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     t1, t2 = st.tabs(["Informe del día", "Preguntale al analista"])
     with t1:
@@ -661,7 +679,7 @@ def page_ia():
         if has_key and st.button("Generar / regenerar informe"):
             from cci import analyst
             with st.spinner("El analista está revisando los números…"):
-                analyst.daily_report(D)
+                analyst.daily_report(D, BRAND)
             st.cache_data.clear()
             st.rerun()
     with t2:
@@ -678,7 +696,7 @@ def page_ia():
             from cci import analyst
             st.chat_message("user").markdown(q)
             with st.chat_message("assistant"), st.spinner("Consultando datos…"):
-                ans, msgs = analyst.ask(q, hist)
+                ans, msgs = analyst.ask(f"[Marca seleccionada en el panel: {BRAND_NAME}] {q}", hist)
                 st.markdown(ans)
             st.session_state["chat"] = msgs
             st.session_state["chat_view"] += [("user", q), ("assistant", ans)]

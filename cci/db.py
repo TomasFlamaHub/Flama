@@ -25,6 +25,7 @@ branch = Table(
     "branch", metadata,
     Column("branch_id", String(16), primary_key=True),
     Column("name", String(120), nullable=False),
+    Column("brand_id", String(30)),
     Column("active", Boolean, default=True),
 )
 
@@ -157,6 +158,7 @@ alert = Table(
     Column("business_date", Date, nullable=False, index=True),
     Column("level", String(10), nullable=False),   # ROJO | AMARILLO | VERDE
     Column("code", String(40), nullable=False),
+    Column("brand_id", String(30)),
     Column("branch_id", String(16)),
     Column("platform_id", String(16)),
     Column("title", String(300)),
@@ -171,6 +173,7 @@ ai_report = Table(
     "ai_report", metadata,
     Column("id", Integer, primary_key=True, autoincrement=True),
     Column("business_date", Date, nullable=False, index=True),
+    Column("brand_id", String(30)),
     Column("generated_at", DateTime, nullable=False),
     Column("model", String(60)),
     Column("content_md", Text),
@@ -196,7 +199,8 @@ def init_db() -> None:
     eng = engine()
     metadata.create_all(eng)
     s = config.settings()
-    upsert(branch, [{"branch_id": b["id"], "name": b["name"], "active": True} for b in s["branches"]])
+    upsert(branch, [{"branch_id": b["id"], "name": b["name"], "brand_id": config.brand_of(b["id"]), "active": True}
+                    for b in s["branches"]])
     upsert(platform, [{"platform_id": k, "name": v["name"]} for k, v in s["platforms"].items()])
     maps = [m for m in s.get("store_mapping", []) if m.get("external_store_id") not in (None, "", "COMPLETAR")]
     if maps:

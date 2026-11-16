@@ -24,7 +24,7 @@ def test_to_number_chilean_format():
 
 
 def test_orders_upsert_is_idempotent():
-    df = pd.DataFrame({"order_id": ["A1", "A2", "A2"], "store": ["S1", "S2", "S2"],
+    df = pd.DataFrame({"order_id": ["A1", "A2", "A2"], "store": ["KOBO1", "KOBO2", "KOBO2"],
                        "created_at": pd.to_datetime(["2026-11-10 13:00"] * 3), "status": ["completed"] * 3,
                        "gross_amount": [1000.0, 2000.0, 2500.0]})
     r1 = loader.load_orders(df, "rappi", "t1", "test")
@@ -92,15 +92,28 @@ def test_template_csv_ingestion(tmp_path):
     (inbox / "plantilla_ordenes_test.csv").write_text(
         "plataforma,id_orden,tienda,fecha_hora,estado,venta_bruta,descuento_local,descuento_plataforma,"
         "comision,otros_cargos,liquidacion,motivo_cancelacion\n"
-        "justo,T-1,S3,2026-11-11 20:15,completada,15990,0,0,800,0,15190,\n"
-        "rappi,T-2,Sucursal 4,2026-11-12 01:30,cancelada,9990,0,0,,,,Sin repartidor\n", encoding="utf-8")
+        "justo,T-1,KOBO3,2026-11-11 20:15,completada,15990,0,0,800,0,15190,\n"
+        "rappi,T-2,Kobo 4,2026-11-12 01:30,cancelada,9990,0,0,,,,Sin repartidor\n", encoding="utf-8")
     out = files.ingest_inbox(inbox, done)
     assert out[0]["status"] == "ok", out
     o = db.read_df("SELECT platform_id, branch_id, business_date, status FROM orders WHERE order_id LIKE 'T-%' "
                    "ORDER BY order_id")
-    assert list(o["branch_id"]) == ["S3", "S4"] and list(o["status"]) == ["completed", "cancelled"]
+    assert list(o["branch_id"]) == ["KOBO3", "KOBO4"] and list(o["status"]) == ["completed", "cancelled"]
     assert str(o.loc[1, "business_date"])[:10] == "2026-11-11"  # 01:30 cuenta para el día anterior
     # reprocesar el mismo archivo no duplica
     (inbox / "plantilla_ordenes_test.csv").write_bytes((done / __import__("datetime").date.today().isoformat()
                                                         / "plantilla_ordenes_test.csv").read_bytes())
     assert files.ingest_inbox(inbox, done)[0]["status"].startswith("skipped")
+
+
+def test_brands_are_separated():
+    from cci import config, demo, factpack
+    demo.load(date(2026, 11, 12), days=40)
+    D = date(2026, 11, 12)
+    crust = kpis.load_panel(D - timedelta(days=7), D, brand="crust")
+    assert set(crust["branch_id"]) == {"CRUST1", "CRUST2"} and set(crust["platform_id"]) == {"ubereats"}
+    kobo = kpis.load_panel(D - timedelta(days=7), D, brand="kobo")
+    assert set(kobo["branch_id"]) == set(config.branches_of("kobo"))
+    fp = factpack.build(D, "crust")
+    assert fp["marca"] == "The Crust" and fp["plataformas_de_la_marca"] == ["Uber Eats"]
+    demo.purge()

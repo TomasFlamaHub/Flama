@@ -31,10 +31,12 @@ def _small(s: dict) -> dict:
     return {k: s.get(k) for k in keep}
 
 
-def build(D: date) -> dict:
+def build(D: date, brand: str | None = None) -> dict:
+    """Paquete de hechos de una marca (o de todas si brand es None)."""
     P = kpis.Periods(D)
     s, e = P.load_range
-    panel = kpis.load_panel(s, e)
+    panel = kpis.load_panel(s, e, brand=brand)
+    BR = config.branches_of(brand) if brand else None
     bn, pn = config.branch_names(), config.platform_names()
     panel["branch"] = panel["branch_id"].map(bn)
     panel["platform"] = panel["platform_id"].map(pn)
@@ -80,18 +82,25 @@ def build(D: date) -> dict:
                            "aporte_ticket": dec["ticket"], "var_pct": dec["pct"]})
     decomp.sort(key=lambda x: x["delta_venta"])
 
-    mixc = kpis.mix_compare(kpis.product_mix(*P.wtd), kpis.product_mix(*P.wtd_prev))
+    mixc = kpis.mix_compare(kpis.product_mix(*P.wtd, BR), kpis.product_mix(*P.wtd_prev, BR))
     movers = mixc[(mixc["revenue_base"] > 0)].copy()
     movers = pd.concat([movers.nsmallest(5, "delta_revenue"), movers.nlargest(5, "delta_revenue")])
-    div = kpis.branch_mix_divergence(kpis.product_mix(*P.wtd))
+    div = kpis.branch_mix_divergence(kpis.product_mix(*P.wtd, BR))
+    if not div.empty:
+        div["branch_id"] = div["branch_id"].map(bn)
 
-    alerts = db.read_df("SELECT level, title, what, magnitude, comparison, recommendation FROM alert "
+    alerts = db.read_df("SELECT level, brand_id, title, what, magnitude, comparison, recommendation FROM alert "
                         "WHERE business_date = :d", {"d": D.isoformat()})
+    if brand:
+        alerts = alerts[alerts["brand_id"] == brand]
     dq = db.read_df("SELECT severity, check_name, detail FROM dq_issue WHERE business_date = :d "
                     "AND severity IN ('error','warning')", {"d": D.isoformat()})
 
     return _clean({
         "fecha_analizada": D,
+        "marca": config.brands().get(brand, {}).get("name") if brand else "Todas las marcas",
+        "sucursales_de_la_marca": [bn[b] for b in (BR or list(bn))],
+        "plataformas_de_la_marca": [pn[p] for p in (config.brands()[brand]["platforms"] if brand else pn)],
         "es_demo": kpis.is_demo_data(),
         "moneda": config.settings()["business"]["currency"],
         "venta_principal": "venta bruta" if kpis.sales_col() == "gross" else "venta neta",
