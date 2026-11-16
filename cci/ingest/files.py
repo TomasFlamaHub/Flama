@@ -133,6 +133,34 @@ def ingest_file(path: Path, mapping: dict, is_demo: bool = False) -> str:
     return status
 
 
+def native_parsers():
+    """Lectores específicos de reportes reales (formatos complejos: varias hojas, encabezados en 2 filas)."""
+    from . import rappi, ubereats
+    return rappi.PARSERS + ubereats.PARSERS
+
+
+def match_parser(path: Path):
+    for name, detect, load in native_parsers():
+        try:
+            if detect(path):
+                return name, load
+        except Exception:
+            continue
+    return None
+
+
+def ingest_with_parser(path: Path, name: str, load) -> str:
+    run_id, started, h = uuid.uuid4().hex[:16], db.now_utc(), file_hash(path)
+    platform_id = name.split("_")[0]
+    try:
+        results = load(path, run_id)
+        return loader.record_run(run_id, started, platform_id, "file", path.name, results, h, f"lector {name}")
+    except Exception as exc:
+        r = loader.LoadResult(name)
+        r.issue("error", "archivo_ilegible", f"{path.name}: {exc}", platform_id)
+        return loader.record_run(run_id, started, platform_id, "file", path.name, [r], h, str(exc)[:2000])
+
+
 def ingest_inbox(inbox: Path | None = None, processed: Path | None = None, is_demo: bool = False) -> list[dict]:
     """Procesa todos los archivos de data/inbox. Los cargados se mueven a data/processed/AAAA-MM-DD/."""
     inbox = inbox or config.DATA_DIR / "inbox"
@@ -144,6 +172,13 @@ def ingest_inbox(inbox: Path | None = None, processed: Path | None = None, is_de
         if already_loaded(h):
             summary.append({"file": path.name, "status": "skipped (ya cargado)"})
             _move(path, processed)
+            continue
+        parser = match_parser(path)
+        if parser:
+            status = ingest_with_parser(path, *parser)
+            summary.append({"file": path.name, "status": status, "mapping": parser[0]})
+            if status != "error":
+                _move(path, processed)
             continue
         m = match_mapping(path.name, mappings)
         if not m:

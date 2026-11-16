@@ -114,7 +114,84 @@ store_day = Table(  # métricas operativas diarias por sucursal x plataforma
     Column("business_date", Date, primary_key=True),
     Column("scheduled_minutes", Float),   # horario en que DEBERÍA estar abierto
     Column("open_minutes", Float),        # Open Time real
+    Column("offline_minutes", Float),     # minutos sin disponibilidad informados por la plataforma
     Column("sessions", Float),            # visitas/sesiones según definición de la plataforma
+    Column("is_demo", Boolean, default=False),
+    Column("source", String(300)),
+    Column("run_id", String(40)),
+)
+
+funnel_period = Table(  # embudo de conversión por período (las plataformas no lo dan diario)
+    "funnel_period", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("branch_id", String(16), primary_key=True),   # ALL_<marca> = todas las tiendas juntas
+    Column("start_date", Date, primary_key=True),
+    Column("end_date", Date, primary_key=True),
+    Column("store_views", Float),      # tienda visualizada / impresiones
+    Column("menu_views", Float),       # vieron el menú
+    Column("add_to_cart", Float),
+    Column("orders", Float),
+    Column("conversion_reported", Float),  # tasa que muestra el portal, si solo existe el %
+    Column("is_demo", Boolean, default=False),
+    Column("source", String(300)),
+    Column("run_id", String(40)),
+)
+
+quality_events = Table(  # reclamos, errores de pedido, cancelaciones con motivo
+    "quality_events", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("event_id", String(160), primary_key=True),
+    Column("kind", String(30)),        # reclamo | reclamo_producto | cancelacion | error_pedido
+    Column("order_id", String(120)),
+    Column("branch_id", String(16), index=True),
+    Column("business_date", Date, index=True),
+    Column("reason", String(200)),
+    Column("detail", Text),
+    Column("product", String(300)),
+    Column("amount", Float),
+    Column("is_demo", Boolean, default=False),
+    Column("source", String(300)),
+    Column("run_id", String(40)),
+)
+
+reviews = Table(
+    "reviews", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("review_id", String(160), primary_key=True),
+    Column("order_id", String(120)),
+    Column("branch_id", String(16), index=True),
+    Column("business_date", Date, index=True),
+    Column("rating", Float),
+    Column("reason", String(300)),
+    Column("comment", Text),
+    Column("is_demo", Boolean, default=False),
+    Column("source", String(300)),
+    Column("run_id", String(40)),
+)
+
+order_ops = Table(  # tiempos operativos por pedido
+    "order_ops", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("order_id", String(120), primary_key=True),
+    Column("branch_id", String(16), index=True),
+    Column("business_date", Date, index=True),
+    Column("prep_expected_min", Float),
+    Column("courier_wait_min", Float),
+    Column("prep_real_min", Float),
+    Column("total_min", Float),
+    Column("source", String(300)),
+    Column("run_id", String(40)),
+)
+
+costs = Table(  # costos que no son por pedido: publicidad, ajustes, cargos
+    "costs", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("cost_id", String(160), primary_key=True),
+    Column("branch_id", String(16), index=True),
+    Column("business_date", Date, index=True),
+    Column("kind", String(40)),        # ads | ajuste | otro   (monto positivo = costo)
+    Column("amount", Float),
+    Column("description", Text),
     Column("is_demo", Boolean, default=False),
     Column("source", String(300)),
     Column("run_id", String(40)),

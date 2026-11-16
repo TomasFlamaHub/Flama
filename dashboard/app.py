@@ -172,6 +172,13 @@ def header(title: str, subtitle: str = ""):
     if DEMO:
         st.markdown('<div class="demo-banner">⚠ DATOS DE DEMOSTRACIÓN · sintéticos, no corresponden al negocio real</div>',
                     unsafe_allow_html=True)
+    recent = panel[(panel["business_date"] > D - timedelta(days=7)) & (panel["orders"] > 0)]
+    present = set(recent["platform_id"].unique())
+    missing = [PN[p] for p in (sel_p or list(PN)) if p not in present]
+    if missing:
+        st.warning(f"**Datos parciales:** no hay órdenes cargadas de {', '.join(missing)} en los últimos 7 días. "
+                   f"Las cifras de esta pantalla incluyen solo: {', '.join(PN[p] for p in present) or 'ninguna plataforma'}.",
+                   icon="⚠️")
     st.markdown(f"## {title}")
     st.caption(f"{scope} · día analizado: {DIAS[D.weekday()]} {D:%d/%m/%Y}" + (f" · {subtitle}" if subtitle else ""))
 
@@ -665,6 +672,138 @@ def page_alertas():
                          "ORDER BY started_at DESC LIMIT 50"), hide_index=True, use_container_width=True)
 
 
+PERIOD_OPTS_LONG = {
+    "Semana acumulada": lambda: P.wtd,
+    "Mes acumulado": lambda: P.mtd,
+    "Últimas 4 semanas": lambda: (D - timedelta(days=27), D),
+    "Últimas 12 semanas": lambda: (D - timedelta(days=83), D),
+}
+
+
+def _in(df, col="branch_id"):
+    df = df[df[col].isin(SB)] if col in df else df
+    return df[df["platform_id"].isin(sel_p)] if sel_p and "platform_id" in df else df
+
+
+def page_rentabilidad():
+    header("Rentabilidad y calidad")
+    opt = st.radio("Período", list(PERIOD_OPTS_LONG), horizontal=True, index=3)
+    a, b = PERIOD_OPTS_LONG[opt]()
+    pr = {"a": a.isoformat(), "b": b.isoformat()}
+    o = _in(sql("""SELECT branch_id, platform_id, COUNT(*) AS ordenes, SUM(gross_amount) AS bruta,
+                   SUM(discount_merchant) AS desc_local, SUM(discount_platform) AS desc_plat,
+                   SUM(commission) AS comision, SUM(other_fees) AS otros, SUM(payout_amount) AS liquidacion
+                   FROM orders WHERE status='completed' AND business_date BETWEEN :a AND :b
+                   GROUP BY branch_id, platform_id""", **pr))
+    if o.empty:
+        st.info("Sin órdenes en el período.")
+        return
+    adj = _in(sql("""SELECT branch_id, platform_id, SUM(amount) AS compensaciones FROM adjustments
+                     WHERE business_date BETWEEN :a AND :b GROUP BY branch_id, platform_id""", **pr))
+    ads = _in(sql("""SELECT branch_id, platform_id, SUM(CASE WHEN kind='ads' THEN amount ELSE 0 END) AS ads,
+                     SUM(CASE WHEN kind<>'ads' THEN amount ELSE 0 END) AS ajustes FROM costs
+                     WHERE business_date BETWEEN :a AND :b GROUP BY branch_id, platform_id""", **pr))
+    m = o.merge(adj, how="left", on=["branch_id", "platform_id"]).merge(ads, how="left", on=["branch_id", "platform_id"])
+    m = m.fillna({"compensaciones": 0, "ads": 0, "ajustes": 0, "comision": 0, "otros": 0})
+    m["neta"] = m["bruta"] - m["desc_local"]
+    m["resultado"] = m["neta"] - m["comision"] - m["otros"] - m["compensaciones"] - m["ads"] - m["ajustes"]
+
+    st.markdown("##### De la venta bruta a lo que queda para el local")
+    st.caption("Venta bruta (precio de menú) − descuentos que paga el local − comisión e IVA − otros cargos − "
+               "compensaciones − publicidad = **resultado después de plataforma** (antes de costo de comida y operación).")
+    by = st.radio("Ver por", ["Sucursal", "Plataforma"], horizontal=True)
+    key = "branch_id" if by == "Sucursal" else "platform_id"
+    g = m.groupby(key)[["ordenes", "bruta", "desc_local", "neta", "comision", "otros", "compensaciones", "ads",
+                        "ajustes", "resultado"]].sum()
+    g.index = g.index.map(BN_ALL if key == "branch_id" else PN_ALL)
+    t = pd.DataFrame({"Órdenes": g["ordenes"], "Venta bruta": g["bruta"], "Ticket bruto": g["bruta"] / g["ordenes"],
+                      "Descuentos %": g["desc_local"] / g["bruta"] * 100, "Venta neta": g["neta"],
+                      "Comisión %": g["comision"] / g["bruta"] * 100, "Compensaciones %": g["compensaciones"] / g["bruta"] * 100,
+                      "Publicidad $": g["ads"], "Publicidad %": g["ads"] / g["bruta"] * 100,
+                      "Resultado": g["resultado"], "Resultado %": g["resultado"] / g["bruta"] * 100})
+    for c_ in ["Venta bruta", "Ticket bruto", "Venta neta", "Publicidad $", "Resultado"]:
+        t[c_] = t[c_].round(0)
+    t = t.round(1)
+    t.index.name = by
+    loc = st.column_config.NumberColumn(format="localized")
+    pc = st.column_config.NumberColumn(format="%.1f%%")
+    st.dataframe(t, use_container_width=True, column_config={
+        "Órdenes": loc, "Venta bruta": loc, "Ticket bruto": loc, "Venta neta": loc, "Publicidad $": loc, "Resultado": loc,
+        "Descuentos %": pc, "Comisión %": pc, "Compensaciones %": pc, "Publicidad %": pc, "Resultado %": pc})
+    tot = g.sum()
+    steps = [("Venta bruta", tot["bruta"]), ("Descuentos", -tot["desc_local"]), ("Comisión", -tot["comision"]),
+             ("Otros cargos", -tot["otros"]), ("Compensaciones", -tot["compensaciones"]), ("Publicidad", -tot["ads"]),
+             ("Ajustes/reintegros", -tot["ajustes"])]
+    fig = go.Figure(go.Waterfall(x=[s_[0] for s_ in steps] + ["Resultado"], y=[s_[1] for s_ in steps] + [0],
+                                 measure=["absolute"] + ["relative"] * (len(steps) - 1) + ["total"],
+                                 increasing=dict(marker=dict(color=POS)), decreasing=dict(marker=dict(color=NEG)),
+                                 totals=dict(marker=dict(color="#256abf")), connector=dict(line=dict(color=BASE, width=1)),
+                                 text=[money(v) for v in [s_[1] for s_ in steps] + [tot["resultado"]]], textposition="outside"))
+    fig.update_layout(title=dict(text="Cascada del período (todas las sucursales filtradas)", font=dict(size=14)))
+    st.plotly_chart(chart_layout(fig, 340, False), use_container_width=True, theme="streamlit")
+    st.caption("Uber Eats y Justo aparecerán aquí cuando se carguen sus reportes de ganancias / pedidos.")
+
+    st.markdown("---\n##### Calidad: reclamos, cancelaciones y reseñas")
+    q = _in(sql("""SELECT branch_id, platform_id, kind, reason, product, order_id FROM quality_events
+                   WHERE business_date BETWEEN :a AND :b""", **pr))
+    rv = _in(sql("""SELECT branch_id, platform_id, rating, reason FROM reviews WHERE business_date BETWEEN :a AND :b""", **pr))
+    ops = _in(sql("""SELECT branch_id, platform_id, AVG(courier_wait_min) AS espera, AVG(prep_expected_min) AS prep,
+                     COUNT(*) AS n FROM order_ops WHERE business_date BETWEEN :a AND :b
+                     GROUP BY branch_id, platform_id""", **pr))
+    qq = m.groupby("branch_id")["ordenes"].sum().to_frame()
+    rec = q[q["kind"] == "reclamo"].groupby("branch_id")["order_id"].nunique()
+    qq["Reclamos"] = rec
+    qq["Reclamos %"] = qq["Reclamos"] / qq["ordenes"] * 100
+    qq["Calificación"] = rv.groupby("branch_id")["rating"].mean()
+    qq["Reseñas"] = rv.groupby("branch_id").size()
+    qq["Reseñas malas %"] = rv[rv["rating"] <= 2].groupby("branch_id").size() / qq["Reseñas"] * 100
+    qq["Espera repartidor (min)"] = ops.groupby("branch_id")["espera"].mean()
+    qq.index = qq.index.map(BN_ALL)
+    st.dataframe(qq.rename(columns={"ordenes": "Órdenes"}).round(2), use_container_width=True,
+                 column_config={"Reclamos %": pc, "Reseñas malas %": pc})
+    st.caption("Reclamos y espera del repartidor: Rappi (nivel de servicio). La espera solo incluye pedidos con demora "
+               "informados por Rappi. Reseñas: calificación de 1 a 5.")
+    c1, c2 = st.columns(2)
+    with c1:
+        r = q[q["kind"].isin(["reclamo"])].groupby("reason").size().sort_values()
+        if not r.empty:
+            fig = go.Figure(go.Bar(x=r.values, y=r.index, orientation="h", marker=dict(color=NEG, cornerradius=4),
+                                   text=r.values, textposition="outside"))
+            fig.update_layout(title=dict(text="Reclamos por motivo", font=dict(size=14)))
+            st.plotly_chart(chart_layout(fig, 260, False), use_container_width=True, theme="streamlit")
+    with c2:
+        pr_ = q[q["kind"] == "reclamo_producto"].groupby("product").size().sort_values().tail(10)
+        if not pr_.empty:
+            fig = go.Figure(go.Bar(x=pr_.values, y=pr_.index, orientation="h", marker=dict(color=NEG, cornerradius=4),
+                                   text=pr_.values, textposition="outside"))
+            fig.update_layout(title=dict(text="Productos más reclamados", font=dict(size=14)))
+            st.plotly_chart(chart_layout(fig, 300, False), use_container_width=True, theme="streamlit")
+
+    st.markdown("---\n##### Embudo de conversión (por período)")
+    f = sql("SELECT * FROM funnel_period WHERE start_date <= :b AND end_date >= :a ORDER BY start_date DESC", **pr)
+    if f.empty:
+        st.info("Aún no hay datos de embudo para el período. Uber entrega el embudo por período (no diario); "
+                "Rappi solo muestra la tasa de conversión en pantalla, sin exportar visitas.")
+    else:
+        f["Tienda"] = f["branch_id"].map(lambda x: BN_ALL.get(x, "Todas (" + x.replace("ALL_", "") + ")"))
+        f["Plataforma"] = f["platform_id"].map(PN_ALL)
+        f["Menú/tienda %"] = f["menu_views"] / f["store_views"] * 100
+        f["Carrito/menú %"] = f["add_to_cart"] / f["menu_views"] * 100
+        f["Pedido/carrito %"] = f["orders"] / f["add_to_cart"] * 100
+        f["CVR menú %"] = f["orders"] / f["menu_views"] * 100
+        f["CVR total %"] = f["orders"] / f["store_views"] * 100
+        st.dataframe(f[["Tienda", "Plataforma", "start_date", "end_date", "store_views", "menu_views", "add_to_cart",
+                        "orders", "Menú/tienda %", "Carrito/menú %", "Pedido/carrito %", "CVR menú %", "CVR total %"]]
+                     .rename(columns={"start_date": "Desde", "end_date": "Hasta", "store_views": "Vieron la tienda",
+                                      "menu_views": "Vieron el menú", "add_to_cart": "Agregaron al carrito",
+                                      "orders": "Pedidos"}).round(1),
+                     hide_index=True, use_container_width=True,
+                     column_config={k: pc for k in ["Menú/tienda %", "Carrito/menú %", "Pedido/carrito %", "CVR menú %",
+                                                    "CVR total %"]})
+        st.caption("Uber: 'Vieron la tienda' = usuarios que vieron la tienda en listados; CVR menú = pedidos / vistas "
+                   "del menú (definición del portal).")
+
+
 def page_ia():
     header("Analista IA")
     rep = ai_rep()
@@ -740,6 +879,7 @@ pages = [
     st.Page(page_mix, title="Mix de productos", icon="🍔", url_path="mix"),
     st.Page(page_semanal, title="Análisis semanal", icon="📅", url_path="semanal"),
     st.Page(page_mensual, title="Análisis mensual", icon="🗓️", url_path="mensual"),
+    st.Page(page_rentabilidad, title="Rentabilidad y calidad", icon="💰", url_path="rentabilidad"),
     st.Page(page_alertas, title="Alertas", icon="🚨", url_path="alertas"),
     st.Page(page_ia, title="Analista IA", icon="🧠", url_path="analista"),
     st.Page(page_cargar, title="Cargar reportes", icon="📤", url_path="cargar"),

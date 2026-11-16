@@ -194,7 +194,7 @@ def load_store_day(df: pd.DataFrame, platform_id: str, run_id: str, source: str,
         df.loc[fill, "open_minutes"] = df.loc[fill, "scheduled_minutes"] - df.loc[fill, "offline_minutes"]
     # Varias filas por día (p.ej. reporte horario) -> se suman
     agg = df.groupby(["branch_id", "business_date"], as_index=False)[
-        ["scheduled_minutes", "open_minutes", "sessions"]].sum(min_count=1)
+        ["scheduled_minutes", "open_minutes", "offline_minutes", "sessions"]].sum(min_count=1)
     over = agg["open_minutes"] > agg["scheduled_minutes"] + 1
     if over.any():
         res.issue("warning", "open_time_mayor_a_horario",

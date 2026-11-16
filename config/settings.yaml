@@ -4,7 +4,7 @@
 # =====================================================================
 
 business:
-  name: "Mi Negocio"                 # COMPLETAR
+  name: "Flama Hub"
   timezone: "America/Santiago"
   currency: "CLP"
   # Hora de corte del día comercial. Un pedido de las 00:40 cuenta para el día
@@ -23,14 +23,16 @@ brands:
 # Sucursales (tiendas). El id es interno y no debe cambiar nunca.
 # COMPLETAR los nombres reales y, en aliases, cómo aparece cada tienda en los reportes.
 branches:
-  - {id: KOBO1,  brand: kobo,  name: "Kobo 1",      aliases: []}
-  - {id: KOBO2,  brand: kobo,  name: "Kobo 2",      aliases: []}
-  - {id: KOBO3,  brand: kobo,  name: "Kobo 3",      aliases: []}
-  - {id: KOBO4,  brand: kobo,  name: "Kobo 4",      aliases: []}
-  - {id: KOBO5,  brand: kobo,  name: "Kobo 5",      aliases: []}
-  - {id: KOBO6,  brand: kobo,  name: "Kobo 6",      aliases: []}
-  - {id: CRUST1, brand: crust, name: "The Crust 1", aliases: []}
-  - {id: CRUST2, brand: crust, name: "The Crust 2", aliases: []}
+  # Nombres según Uber Eats. Rappi y Justo usan otros nombres para 2 tiendas (ver aliases).
+  # (*) Cruce Peñalolén = "Los Presidentes" y Tobalaba = "El Golf" inferido por dirección: CONFIRMAR.
+  - {id: KLAREINA,  brand: kobo,  name: "La Reina",     aliases: ["Kobo Sushi - La Reina"]}
+  - {id: KLASCONDES, brand: kobo, name: "Las Condes",   aliases: ["Kobo Sushi - Las Condes"]}
+  - {id: KMMONTT,   brand: kobo,  name: "Manuel Montt", aliases: ["Kobo Sushi - Manuel Montt"]}
+  - {id: KPENALOLEN, brand: kobo, name: "Peñalolén",    aliases: ["Kobo Sushi - Peñalolén", "Kobo Sushi - Los Presidentes", "Los Presidentes"]}
+  - {id: KSANMIGUEL, brand: kobo, name: "San Miguel",   aliases: ["Kobo Sushi - San Miguel"]}
+  - {id: KTOBALABA, brand: kobo,  name: "Tobalaba",     aliases: ["Kobo Sushi - Tobalaba", "Kobo Sushi - El Golf", "El Golf"]}
+  - {id: CRUST1,    brand: crust, name: "The Crust 1",  aliases: []}   # COMPLETAR (cuenta Uber de The Crust)
+  - {id: CRUST2,    brand: crust, name: "The Crust 2",  aliases: []}   # COMPLETAR
 
 platforms:
   justo:
@@ -38,15 +40,15 @@ platforms:
     # Comisión contractual (0.05 = 5%). Solo se usa si el reporte NO trae la comisión
     # real; en ese caso la liquidación queda marcada como ESTIMADA. null = no estimar.
     commission_rate: null             # COMPLETAR
-    sessions_definition: "COMPLETAR: fuente y definición de visitas (p.ej. GA4 sesiones en tienda Justo)"
+    sessions_definition: "Justo no tiene visitas en su admin; revisar Google Analytics en Página web > Integraciones."
   rappi:
     name: "Rappi"
     commission_rate: null             # COMPLETAR
-    sessions_definition: "COMPLETAR: definición de 'visitas/sesiones' según el portal Rappi Partners"
+    sessions_definition: "Rappi no exporta visitas. Solo muestra en pantalla la tasa de conversión: '% de todos los usuarios que te han visitado y finalizaron una orden'."
   ubereats:
     name: "Uber Eats"
     commission_rate: null             # COMPLETAR
-    sessions_definition: "COMPLETAR: definición según Uber Eats Manager"
+    sessions_definition: "Embudo de Uber: Tienda visualizada -> Vieron el menú -> Agregaron al carrito -> Pedidos. Conversión del menú = pedidos / visualizaciones del menú. Solo por período (no diario)."
 
 # Cómo se identifica cada sucursal dentro de cada plataforma (ID de tienda externo).
 # Una fila por sucursal x plataforma. Sin esto, las órdenes no se pueden asignar.
@@ -55,8 +57,28 @@ platforms:
 #   Rappi Partners:    https://restaurantes.rappi.com  (una tienda conocida: storeId CL900114436 -> ¿qué sucursal Kobo?)
 #   Justo admin:       https://admin.getjusto.com
 store_mapping:
-  - {platform: justo,    external_store_id: "COMPLETAR", branch_id: KOBO1}
-  # ... repetir para KOBO1..KOBO6 en justo, rappi y ubereats, y CRUST1..CRUST2 en ubereats
+  # Uber Eats (UUID de tienda)
+  - {platform: ubereats, external_store_id: "38211490-b391-547e-b7e6-2bb3bc22e816", branch_id: KLAREINA}
+  - {platform: ubereats, external_store_id: "c0f820fc-e03f-5b56-b238-a7ce2bc5b6d3", branch_id: KLASCONDES}
+  - {platform: ubereats, external_store_id: "733cd91a-61a5-56fc-b967-16c78ef07571", branch_id: KMMONTT}
+  - {platform: ubereats, external_store_id: "dcd19682-287e-582a-8959-98e749f56c21", branch_id: KPENALOLEN}
+  - {platform: ubereats, external_store_id: "822351b3-7c6e-5ef9-ae9e-2ba4f1fb9934", branch_id: KSANMIGUEL}
+  - {platform: ubereats, external_store_id: "fc4bdf59-c313-58ef-b34e-94a00e0bad00", branch_id: KTOBALABA}
+  # Rappi (storeId)
+  - {platform: rappi, external_store_id: "900106330", branch_id: KLAREINA}
+  - {platform: rappi, external_store_id: "900036202", branch_id: KLASCONDES}
+  - {platform: rappi, external_store_id: "900023957", branch_id: KMMONTT}
+  - {platform: rappi, external_store_id: "900114436", branch_id: KPENALOLEN}
+  - {platform: rappi, external_store_id: "900088658", branch_id: KSANMIGUEL}
+  - {platform: rappi, external_store_id: "900086633", branch_id: KTOBALABA}
+  # Justo (ID de local)
+  - {platform: justo, external_store_id: "ZSPxXgSHB7QzTqswE", branch_id: KLAREINA}
+  - {platform: justo, external_store_id: "SG6LjcMLn3vwz9TqD", branch_id: KLASCONDES}
+  - {platform: justo, external_store_id: "vdQCEtckMMesLSfhp", branch_id: KMMONTT}
+  - {platform: justo, external_store_id: "jDTNvbtCMPPAdY9b9", branch_id: KPENALOLEN}
+  - {platform: justo, external_store_id: "hgqss9w2CFX7gwz4f", branch_id: KSANMIGUEL}
+  - {platform: justo, external_store_id: "p9ckCANYSPxNKTkrN", branch_id: KTOBALABA}
+  # The Crust (Uber): COMPLETAR con los UUID de su cuenta
 
 # Objetivos de venta (opcionales). Si no hay objetivo, la alerta de run rate
 # compara contra la venta real de la semana/mes anterior.

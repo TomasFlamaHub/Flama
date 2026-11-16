@@ -221,8 +221,7 @@ def dow_weights(hist: pd.DataFrame, metric: str, data_start: date | None, hist_e
     start = hist_end - timedelta(days=7 * n_weeks - 1)
     h = hist[hist["business_date"] >= start]
     daily = h.groupby("business_date")[metric].sum()
-    full = pd.Series(0.0, index=days(start, hist_end))
-    full.loc[daily.index] = daily.values
+    full = pd.to_numeric(daily, errors="coerce").reindex(days(start, hist_end)).fillna(0.0).astype(float)
     by_dow = full.groupby([d.weekday() for d in full.index]).mean()
     if by_dow.sum() <= 0:
         return None, n_weeks

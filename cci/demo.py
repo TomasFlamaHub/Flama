@@ -32,7 +32,7 @@ PRODUCTS_CRUST = [
     ("Bebida 1,5L", "Bebidas", 2990, 6), ("Cookie", "Postres", 2490, 3),
 ]
 DOW = [0.78, 0.82, 0.88, 0.97, 1.25, 1.42, 1.15]
-BRANCH_SCALE = {"KOBO1": 1.25, "KOBO2": 1.0, "KOBO3": 0.95, "KOBO4": 0.85, "KOBO5": 1.1, "KOBO6": 0.7,
+BRANCH_SCALE = {"KLAREINA": 1.25, "KLASCONDES": 1.0, "KMMONTT": 0.95, "KPENALOLEN": 0.85, "KSANMIGUEL": 1.1, "KTOBALABA": 0.7,
                 "CRUST1": 1.3, "CRUST2": 1.0}
 PLATFORM = {  # pedidos/día base, conversión, comisión demo
     "rappi": (16, 0.105, 0.24), "ubereats": (12, 0.095, 0.28), "justo": (7, 0.17, 0.05)}
@@ -67,17 +67,17 @@ def generate(end: date, days: int = 75, seed: int = 7) -> dict[str, pd.DataFrame
                 refund_rate = 0.015
                 local_w = weights.copy()
                 # ---- escenarios sintéticos para que las alertas tengan algo que mostrar
-                if b == "KOBO3" and p == "rappi" and d > end - timedelta(days=7):
+                if b == "KMMONTT" and p == "rappi" and d > end - timedelta(days=7):
                     sess *= 0.72                                      # caída de tráfico en Rappi
-                if b == "KOBO5" and d == end:
+                if b == "KSANMIGUEL" and d == end:
                     refund_rate = 0.09                                # pico de resarcimientos
-                if b == "KOBO2" and p == "ubereats" and d == end:
+                if b == "KLASCONDES" and p == "ubereats" and d == end:
                     open_m = 470.0                                    # tienda pausada ~4 h
-                if b == "KOBO4" and d == end:
+                if b == "KPENALOLEN" and d == end:
                     local_w[names.index("Combo Clásico + Papas + Bebida")] = 0
                 if b == "CRUST2" and d > end - timedelta(days=5):
                     sess *= 0.7                                       # The Crust 2: caída de tráfico  # producto que dejó de venderse
-                if b == "KOBO6" and p == "justo" and d > end - timedelta(days=10):
+                if b == "KTOBALABA" and p == "justo" and d > end - timedelta(days=10):
                     conv_d *= 1.25                                    # mejora de conversión en Justo
                 n = int(rng.poisson(max(sess * conv_d * open_m / sched, 0.1)))
                 ops.append({"platform": p, "store": b, "date": d, "scheduled_minutes": sched,
