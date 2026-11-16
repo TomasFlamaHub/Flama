@@ -109,6 +109,10 @@ def load_orders(df: pd.DataFrame, platform_id: str, run_id: str, source: str, is
     if neg.any():
         res.issue("warning", "monto_negativo", f"{int(neg.sum())} órdenes con venta negativa", platform_id)
 
+    # Columnas financieras que la fuente realmente trae: solo esas se escriben, así una fuente sin
+    # finanzas (p.ej. el historial de pedidos de Uber) no borra lo que cargó otra (el reporte de ganancias).
+    FIN = ["discount_merchant", "discount_platform", "commission", "other_fees", "payout_amount"]
+    provided = {c for c in FIN if c in df.columns}
     for c in ["discount_merchant", "discount_platform"]:
         df[c] = df[c].fillna(0.0) if c in df.columns else 0.0
     for c in ["commission", "other_fees", "payout_amount"]:
@@ -128,7 +132,11 @@ def load_orders(df: pd.DataFrame, platform_id: str, run_id: str, source: str, is
     df["business_date"] = business_date(df["created_at"])
     now = db.now_utc()
     out = df.assign(platform_id=platform_id, is_demo=is_demo, source=source, run_id=run_id, updated_at=now)
-    cols = [c.name for c in db.orders.columns]
+    if rate is not None and need.any():
+        provided |= {"payout_amount"}
+    cols = [c.name for c in db.orders.columns
+            if c.name not in FIN or c.name in provided] + (["payout_is_estimated"] if "payout_amount" in provided else [])
+    cols = [c for c in dict.fromkeys(cols) if c != "payout_is_estimated" or "payout_amount" in provided]
     res.inserted, res.updated = db.upsert(db.orders, _records(out[cols]))
     return res
 

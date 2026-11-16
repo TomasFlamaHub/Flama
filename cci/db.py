@@ -224,6 +224,9 @@ order_ops = Table(  # tiempos operativos por pedido
     Column("courier_wait_min", Float),
     Column("prep_real_min", Float),
     Column("total_min", Float),
+    Column("accept_min", Float),          # minutos hasta aceptar el pedido
+    Column("avoidable_wait_min", Float),  # espera evitable del repartidor (Uber)
+    Column("delivery_min", Float),        # tiempo total de entrega
     Column("source", String(300)),
     Column("run_id", String(40)),
 )
@@ -320,6 +323,7 @@ def init_db() -> None:
     """Crea tablas y sincroniza sucursales/plataformas/mapeo de tiendas desde settings.yaml."""
     eng = engine()
     metadata.create_all(eng)
+    migrate_add_columns(eng)
     s = config.settings()
     upsert(branch, [{"branch_id": b["id"], "name": b["name"], "brand_id": config.brand_of(b["id"]), "active": True}
                     for b in s["branches"]])
@@ -328,6 +332,21 @@ def init_db() -> None:
     if maps:
         upsert(store_map, [{"platform_id": m["platform"], "external_store_id": str(m["external_store_id"]),
                             "branch_id": m["branch_id"]} for m in maps])
+
+
+def migrate_add_columns(eng: Engine) -> None:
+    """Migración mínima: agrega columnas nuevas a tablas existentes (nunca borra ni cambia tipos)."""
+    from sqlalchemy import inspect
+    insp = inspect(eng)
+    with eng.begin() as conn:
+        for table in metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name not in have:
+                    ctype = col.type.compile(dialect=eng.dialect)
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ctype}'))
 
 
 def _pk_cols(table: Table) -> list[str]:

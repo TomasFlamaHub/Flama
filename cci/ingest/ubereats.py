@@ -68,7 +68,9 @@ DOW = {"lun": 0, "mar": 1, "mié": 2, "mie": 2, "jue": 3, "vie": 4, "sáb": 5, "
 
 
 def _head(path: Path) -> str:
-    return path.read_bytes()[:400].decode("utf-8-sig", "ignore") if path.suffix.lower() == ".csv" else ""
+    if path.suffix.lower() != ".csv":
+        return ""
+    return path.read_bytes()[:600].decode("utf-8-sig", "ignore").replace("\xa0", " ").lstrip("\ufeff")
 
 
 def _period_from_name(path: Path):
@@ -188,3 +190,203 @@ PARSERS = [("ubereats_ranking_tiendas", is_store_leaderboard, load_store_leaderb
            ("ubereats_ventas_semanales", is_weekly_sales, load_weekly_sales),
            ("ubereats_ranking_articulos", is_item_leaderboard, load_item_leaderboard),
            ("ubereats_ventas_por_hora", is_hourly, load_hourly)] + PARSERS
+
+
+# ---------------------------------------------------------------- Informes (detalle por pedido)
+import hashlib as _hl
+import unicodedata as _ud
+
+
+def _clean_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df.columns = [_ud.normalize("NFKC", str(c)).replace("\xa0", " ").strip() for c in df.columns]
+    return df
+
+
+def _n(s) -> pd.Series:
+    return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
+
+def is_order_history(path: Path) -> bool:
+    h = _head(path)
+    return h.startswith("Restaurante,Código externo del restaurante,UUID de la tienda") and "Código del pedido" in h
+
+
+UBER_STATUS = {"completed": "completed", "canceled": "cancelled", "failed": "rejected", "unfulfilled": "rejected"}
+
+
+def load_order_history(path: Path, run_id: str):
+    """Historial de pedidos: estado, valor, cancelaciones y tiempos operativos de cada pedido."""
+    df = _clean_cols(pd.read_csv(path, dtype=str, encoding="utf-8-sig"))
+    wf = "Identificador universal (UUID) del flujo de trabajo"
+    status = df["Estado del pedido"].str.strip().str.lower()
+    orders = pd.DataFrame({
+        "order_id": df[wf].str.strip(),
+        "store": df["UUID de la tienda"].str.strip(),
+        "created_at": pd.to_datetime(df["Hora del pedido del cliente"], errors="coerce"),
+        "status": status.map(lambda s: UBER_STATUS.get(s, f"?{s}")),
+        "gross_amount": _n(df["Valor del recibo"]),
+        "cancel_reason": df["Cancelado por"].where(df["Cancelado por"].notna(), None),
+    })
+    results = [loader.load_orders(orders, P, run_id, path.name)]
+    br = BranchResolver()
+    res = loader.LoadResult("order_ops", rows_read=len(df))
+    f = lambda c: pd.to_numeric(df[c], errors="coerce") if c in df.columns else pd.Series(float("nan"), index=df.index)  # noqa: E731
+    ops = pd.DataFrame({
+        "order_id": orders["order_id"], "store": orders["store"], "ts": orders["created_at"],
+        "prep_expected_min": f("Tiempo original de preparación"),
+        "courier_wait_min": f("Tiempo de espera del repartidor (restaurante)"),
+        "avoidable_wait_min": f("Tiempo de espera evitable del socio de la App (restaurante)"),
+        "accept_min": f("Tiempo hasta que se aceptó el pedido"),
+        "delivery_min": f("Tiempo total de entrega"),
+        "total_min": f("Tiempo total de preparación y de entrega"),
+    })
+    from .normalize import business_date
+    ops = ops[ops["ts"].notna()]
+    ops["business_date"] = business_date(ops["ts"])
+    out = []
+    for r in ops.itertuples():
+        b = br.resolve(P, r.store)
+        if not b:
+            res.rejected += 1
+            continue
+        clean = lambda v: None if pd.isna(v) else float(v)  # noqa: E731
+        out.append({"platform_id": P, "order_id": r.order_id, "branch_id": b, "business_date": r.business_date,
+                    "prep_expected_min": clean(r.prep_expected_min), "courier_wait_min": clean(r.courier_wait_min),
+                    "avoidable_wait_min": clean(r.avoidable_wait_min), "accept_min": clean(r.accept_min),
+                    "delivery_min": clean(r.delivery_min), "total_min": clean(r.total_min),
+                    "source": path.name, "run_id": run_id})
+    res.inserted, res.updated = db.upsert(db.order_ops, out)
+    results.append(res)
+    return results
+
+
+def is_downtime(path: Path) -> bool:
+    h = _head(path)
+    return "Menú disponible" in h and "Restaurante desconectado" in h
+
+
+def load_downtime(path: Path, run_id: str):
+    """Tiempo de inactividad (por hora) -> minutos programados, conectados y desconectados por día."""
+    df = _clean_cols(pd.read_csv(path, dtype=str, encoding="utf-8-sig"))
+    for c in ["Menú disponible", "Restaurante conectado", "Restaurante desconectado"]:
+        df[c] = _n(df[c])
+    g = df.groupby(["UUID de la tienda", "Fecha"], as_index=False)[
+        ["Menú disponible", "Restaurante conectado", "Restaurante desconectado"]].sum()
+    sd = pd.DataFrame({"store": g["UUID de la tienda"], "date": pd.to_datetime(g["Fecha"]).dt.date,
+                       "scheduled_minutes": g["Menú disponible"], "open_minutes": g["Restaurante conectado"],
+                       "offline_minutes": g["Restaurante desconectado"]})
+    sd = sd[sd["scheduled_minutes"] > 0]
+    return [loader.load_store_day(sd, P, run_id, path.name)]
+
+
+def is_earnings_items(path: Path) -> bool:
+    h = _head(path)
+    return h.startswith("Nombre de la tienda,ID externo de la tienda,UUID de la tienda,Id. del pedido") and \
+        "Nombre del artículo" in h
+
+
+def load_earnings_items(path: Path, run_id: str):
+    """Detalles de las ganancias (nivel de artículo).
+
+    Filas de pedido (sin artículo): venta, promociones, tasa de servicio, cargos por error y pago total.
+    Filas de artículo: producto, cantidad y venta (no llevan montos financieros).
+    Filas sin pedido: gasto en anuncios, otras tarifas y ajustes.
+    """
+    df = _clean_cols(pd.read_csv(path, dtype=str, encoding="utf-8-sig"))
+    money = ["Ventas (con IVA)", "Cargo por error en el pedido (sin IVA)", "IVA sobre el cargo por error en el pedido",
+             "Ajustes de precios (con IVA)", "Promociones en artículos (con IVA)", "Tarifa por canje de la oferta",
+             "Impuesto sobre la tarifa de canje de la oferta", "Canjes de oferta de entrega (con IVA)",
+             "Tasa de servicio (con IVA)", "Tarifa de solicitud (con IVA)", "Otras ganancias", "Pago total"]
+    for c in money:
+        df[c] = _n(df[c]) if c in df.columns else 0.0
+    wf = df["Id. del flujo de trabajo"].astype(str).str.strip()
+    df["wf"] = wf
+    is_item = df["Nombre del artículo"].notna()
+    is_order = ~is_item & df["Id. del pedido"].notna()
+    is_other = ~is_item & df["Id. del pedido"].isna()
+    store_of = df[is_order].drop_duplicates("wf").set_index("wf")["UUID de la tienda"]
+    results = []
+
+    # --- pedidos completados con sus montos
+    comp = df[is_order & (df["Estado del pedido"].str.strip() == "Completado")].drop_duplicates("wf", keep="last")
+    ts = pd.to_datetime(comp["Fecha del pedido"] + " " + comp["Hora a la que se aceptó el pedido"].fillna("12:00"),
+                        format="%d/%m/%y %H:%M", errors="coerce")
+    fin = pd.DataFrame({
+        "order_id": comp["wf"], "store": comp["UUID de la tienda"], "created_at": ts, "status": "completed",
+        "gross_amount": comp["Ventas (con IVA)"],
+        "discount_merchant": -(comp["Promociones en artículos (con IVA)"] + comp["Ajustes de precios (con IVA)"]),
+        "discount_platform": 0.0,
+        "commission": -comp["Tasa de servicio (con IVA)"],
+        "other_fees": -(comp["Tarifa por canje de la oferta"] + comp["Impuesto sobre la tarifa de canje de la oferta"]
+                        + comp["Tarifa de solicitud (con IVA)"] + comp["Canjes de oferta de entrega (con IVA)"]),
+        "payout_amount": comp["Pago total"],
+    })
+    # el historial de pedidos (si ya está cargado) manda en hora/estado: aquí solo se completan montos
+    existing = set(db.read_df("SELECT order_id FROM orders WHERE platform_id='ubereats'")["order_id"])
+    new = fin[~fin["order_id"].isin(existing)]
+    upd = fin[fin["order_id"].isin(existing)]
+    if not new.empty:
+        results.append(loader.load_orders(new, P, run_id, path.name))
+    if not upd.empty:
+        r = loader.LoadResult("orders_finanzas", rows_read=len(upd))
+        from sqlalchemy import text
+        with db.engine().begin() as conn:
+            conn.execute(text("""UPDATE orders SET discount_merchant=:dm, discount_platform=0, commission=:cm,
+                                 other_fees=:of, payout_amount=:pa, payout_is_estimated=:est
+                                 WHERE platform_id='ubereats' AND order_id=:oid"""),
+                         [{"dm": float(x.discount_merchant), "cm": float(x.commission), "of": float(x.other_fees),
+                           "pa": float(x.payout_amount), "est": False, "oid": x.order_id} for x in upd.itertuples()])
+        r.updated = len(upd)
+        results.append(r)
+
+    # --- reembolsos por error en el pedido (resarcimientos): neto de disputas ganadas
+    ref = df[is_order & df["Estado del pedido"].str.contains("Reembolso", na=False)].copy()
+    if not ref.empty:
+        ref["monto"] = -(ref["Cargo por error en el pedido (sin IVA)"] + ref["IVA sobre el cargo por error en el pedido"])
+        g = ref.groupby("wf").agg(monto=("monto", "sum"), fecha=("Fecha del pedido", "first"),
+                                  store=("UUID de la tienda", "first"),
+                                  estados=("Estado del pedido", lambda s: ", ".join(sorted(set(s))))).reset_index()
+        g = g[g["monto"].abs() > 0.5]
+        adj = pd.DataFrame({"adjustment_id": "err-" + g["wf"], "order_id": g["wf"], "store": g["store"],
+                            "date": pd.to_datetime(g["fecha"], format="%d/%m/%y").dt.date, "amount": g["monto"],
+                            "kind": "reembolso_error", "reason": g["estados"]})
+        results.append(loader.load_adjustments(adj, P, run_id, path.name))
+
+    # --- artículos
+    it = df[is_item].copy()
+    if not it.empty:
+        it["line_no"] = it.groupby("wf").cumcount() + 1
+        items = pd.DataFrame({"order_id": it["wf"], "line_no": it["line_no"], "product": it["Nombre del artículo"],
+                              "quantity": _n(it["Cantidad final"]).where(_n(it["Cantidad final"]) > 0,
+                                                                         _n(it["Cantidad solicitada"])),
+                              "gross_amount": it["Ventas (con IVA)"]})
+        results.append(loader.load_order_items(items, P, run_id, path.name))
+
+    # --- anuncios y otros cargos sin pedido
+    oth = df[is_other & df["UUID de la tienda"].notna()]
+    if not oth.empty:
+        res = loader.LoadResult("costs", rows_read=len(oth))
+        br = BranchResolver()
+        rows = []
+        for _, r in oth.iterrows():
+            b = br.resolve(P, str(r["UUID de la tienda"]).strip())
+            d = pd.to_datetime(r["Fecha del pedido"], format="%d/%m/%y", errors="coerce")
+            if not b or pd.isna(d):
+                res.rejected += 1
+                continue
+            desc = str(r.get("Descripción de otros pagos") or "")
+            amt = -float(r["Otras ganancias"])
+            kind = "ads" if "anuncio" in desc.lower() else "otro"
+            key = f"{b}|{d.date()}|{desc}|{amt}|{r.get('Id. de referencia de ganancias')}|{r.get('Fecha de pago')}"
+            rows.append({"platform_id": P, "cost_id": _hl.sha1(key.encode()).hexdigest()[:24], "branch_id": b,
+                         "business_date": d.date(), "kind": kind, "amount": amt, "description": desc,
+                         "is_demo": False, "source": path.name, "run_id": run_id})
+        res.inserted, res.updated = db.upsert(db.costs, rows)
+        results.append(res)
+    return results
+
+
+# historial antes que ganancias (las ganancias completan montos de pedidos ya cargados)
+PARSERS = PARSERS[:1] + [("ubereats_historial_pedidos", is_order_history, load_order_history),
+                         ("ubereats_ganancias_articulo", is_earnings_items, load_earnings_items),
+                         ("ubereats_inactividad", is_downtime, load_downtime)] + PARSERS[1:]
