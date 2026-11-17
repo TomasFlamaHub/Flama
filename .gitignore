@@ -8,3 +8,4 @@ data/processed/*
 !data/inbox/.gitkeep
 !data/processed/.gitkeep
 .pytest_cache/
+data/*.sha256

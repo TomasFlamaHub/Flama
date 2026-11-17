@@ -20,6 +20,35 @@ def settings() -> dict:
         return yaml.safe_load(fh)
 
 
+def _db_has_orders(db_file: Path) -> bool:
+    import sqlite3
+    try:
+        with sqlite3.connect(db_file) as c:
+            return c.execute("SELECT COUNT(*) FROM orders").fetchone()[0] > 0
+    except Exception:
+        return False
+
+
+def _restore_from_gz(gz: Path, db_file: Path) -> None:
+    """Descomprime la base si no existe, si está vacía o si el .gz del repositorio cambió."""
+    import gzip
+    import hashlib
+    import shutil
+    marker = db_file.with_suffix(".gz.sha256")
+    digest = hashlib.sha256(gz.read_bytes()).hexdigest()
+    previous = marker.read_text().strip() if marker.exists() else None
+    if previous == digest and db_file.exists():
+        return
+    if previous is None and db_file.exists() and _db_has_orders(db_file):
+        marker.write_text(digest)   # base local con datos: no se pisa
+        return
+    tmp = db_file.with_suffix(".tmp")
+    with gzip.open(gz, "rb") as src, open(tmp, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+    tmp.replace(db_file)
+    marker.write_text(digest)
+
+
 def database_url() -> str:
     """Postgres en producción (Supabase/Neon). SQLite local por defecto."""
     url = os.environ.get("DATABASE_URL")
@@ -34,11 +63,8 @@ def database_url() -> str:
     db_file = DATA_DIR / "cci.db"
     # En el panel publicado la base viaja comprimida (cci.db.gz, en data/ o en la raíz del repo).
     gz = next((g for g in (DATA_DIR / "cci.db.gz", ROOT / "cci.db.gz") if g.exists()), None)
-    if gz and (not db_file.exists() or gz.stat().st_mtime > db_file.stat().st_mtime):
-        import gzip
-        import shutil
-        with gzip.open(gz, "rb") as src, open(db_file, "wb") as dst:
-            shutil.copyfileobj(src, dst)
+    if gz:
+        _restore_from_gz(gz, db_file)
     return f"sqlite:///{db_file}"
 
 
