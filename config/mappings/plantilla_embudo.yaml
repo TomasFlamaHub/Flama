@@ -1,0 +1,18 @@
+# Plantilla canónica de embudo / conversión por período (semana o mes).
+# Sirve para Uber (vistas de tienda, menú, carrito, pedidos) y Rappi (solo % de conversión).
+name: plantilla_embudo
+platform: from_column
+dataset: funnel_period
+verified: true
+file_glob: ["plantilla_embudo*.csv", "plantilla_embudo*.xlsx"]
+read: {sep: ",", decimal: ".", dayfirst: false}
+columns:
+  platform: plataforma            # ubereats | rappi | justo
+  store: tienda                   # nombre de la tienda (como en el portal) o TODAS
+  start: desde                    # AAAA-MM-DD
+  end: hasta                      # AAAA-MM-DD
+  store_views: vieron_tienda      # Uber: "Tienda visualizada"
+  menu_views: vieron_menu         # Uber: "Vieron el menú"
+  add_to_cart: agregaron_carrito  # Uber: "Agregaron artículo al pedido"
+  orders: pedidos                 # Uber: "Pedidos realizados"
+  conversion_reported: conversion_pct   # Rappi: "Tasa de conversión total" (ej. 17)

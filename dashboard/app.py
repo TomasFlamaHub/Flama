@@ -315,6 +315,8 @@ def page_resumen():
            ppf(y["availability"] - d7["availability"]) if y["availability"] and d7["availability"] else None,
            help=f"Tiempo disponible / horario programado. {num(y['unavailable_minutes'])} min fuera de línea ayer.")
 
+    platform_overview()
+
     left, right = st.columns([3, 2])
     with left:
         tab_w, tab_m = st.tabs(["Ritmo semanal", "Ritmo mensual"])
@@ -978,13 +980,266 @@ def page_cargar():
                                for m in ms if m.get("file_glob")]), hide_index=True, use_container_width=True)
 
 
+# ====================================================================== VISTAS POR PLATAFORMA Y TIENDA
+def _rr_by(df: pd.DataFrame, kind: str, group: str | None) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    r = kpis.run_rate(df, D, kind, group)
+    return r.set_index("group")
+
+
+def platform_overview():
+    """Una fila por plataforma (+ total): ayer, semana, mes, proyecciones y comparación."""
+    st.markdown("##### Por plataforma")
+    rows = []
+    plats = [p for p in PN if p in set(panel["platform_id"])]
+    for key in plats + ["TOTAL"]:
+        sub = panel if key == "TOTAL" else panel[panel["platform_id"] == key]
+        f = lambda a, b: kpis.summarize(kpis.filt(sub, a, b))  # noqa: E731
+        y, d7 = f(D, D), f(D - timedelta(days=7), D - timedelta(days=7))
+        w, wp = f(*P.wtd), f(*P.wtd_prev)
+        m, mp = f(*P.mtd), f(*P.prev_mtd)
+        rw = kpis.run_rate(sub, D, "week").iloc[0]
+        rm = kpis.run_rate(sub, D, "month").iloc[0]
+        rows.append({"Plataforma": "Total" if key == "TOTAL" else PN[key],
+                     "Ayer": y["sales"], "Δ ayer %": (kpis.pct(y["sales"], d7["sales"]) or 0) * 100,
+                     "Semana acum.": w["sales"], "Δ sem %": (kpis.pct(w["sales"], wp["sales"]) or 0) * 100,
+                     "Proy. semana": rw["sales_proj"], "vs sem. ant. %": (rw["vs_base_pct"] or 0) * 100,
+                     "Mes acum.": m["sales"], "Δ mes %": (kpis.pct(m["sales"], mp["sales"]) or 0) * 100,
+                     "Proy. mes": rm["sales_proj"], "Mes anterior": rm["base_sales"],
+                     "vs mes ant. %": (rm["vs_base_pct"] or 0) * 100,
+                     "Órdenes mes": m["orders"], "Ticket mes": m["ticket"]})
+    t = pd.DataFrame(rows)
+    money_cols = ["Ayer", "Semana acum.", "Proy. semana", "Mes acum.", "Proy. mes", "Mes anterior", "Ticket mes"]
+    for c_ in money_cols:
+        t[c_] = t[c_].round(0)
+    pc = st.column_config.NumberColumn(format="%+.1f%%")
+    loc = st.column_config.NumberColumn(format="localized")
+    st.dataframe(t, hide_index=True, use_container_width=True,
+                 column_config={**{c_: loc for c_ in money_cols + ["Órdenes mes"]},
+                                **{c_: pc for c_ in ["Δ ayer %", "Δ sem %", "vs sem. ant. %", "Δ mes %", "vs mes ant. %"]}})
+    st.caption("Δ ayer: vs mismo día de la semana anterior · Δ semana / mes: vs misma altura del período anterior · "
+               "Proyección (run rate por día de semana) vs período anterior completo real.")
+    tt = t[t["Plataforma"] != "Total"]
+    if len(tt):
+        fig = go.Figure()
+        fig.add_bar(x=tt["Plataforma"], y=tt["Mes anterior"], name="Mes anterior (real)",
+                    marker=dict(color=BASE, cornerradius=4), text=[money(v) for v in tt["Mes anterior"]],
+                    textposition="outside")
+        fig.add_bar(x=tt["Plataforma"], y=tt["Proy. mes"], name="Mes actual (proyección)",
+                    marker=dict(color=[PLAT_COLOR.get(k, CUR) for k in plats], cornerradius=4),
+                    text=[f"{money(v)} ({pctf(d / 100)})" for v, d in zip(tt["Proy. mes"], tt["vs mes ant. %"])],
+                    textposition="outside")
+        fig.update_layout(barmode="group", bargap=0.35, bargroupgap=0.1,
+                          title=dict(text="Proyección del mes vs mes anterior, por plataforma", font=dict(size=14)))
+        st.plotly_chart(chart_layout(fig, 300), use_container_width=True, theme="streamlit")
+
+
+def _period_ranges(kind: str):
+    return (P.wtd, P.wtd_prev) if kind == "Semana" else (P.mtd, P.prev_mtd)
+
+
+def store_platform_section():
+    st.markdown("---\n##### Tienda × plataforma")
+    kind = st.radio("Comparar", ["Semana", "Mes"], horizontal=True, key="sp_kind",
+                    help="Semana: lunes a ayer vs mismos días de la semana anterior. Mes: 1 a ayer vs mismos días "
+                         "del mes anterior. Proyección vs período anterior completo.")
+    cur_r, base_r = _period_ranges(kind)
+    rr = {}
+    plats = [p for p in PN if p in set(panel["platform_id"])]
+    rows = []
+    for b in [x for x in BN if x in SB]:
+        row = {"Tienda": BN[b]}
+        tot_c = tot_b = 0.0
+        for p in plats:
+            sub = panel[(panel["branch_id"] == b) & (panel["platform_id"] == p)]
+            c = kpis.summarize(kpis.filt(sub, *cur_r))["sales"]
+            bb = kpis.summarize(kpis.filt(sub, *base_r))["sales"]
+            tot_c += c
+            tot_b += bb
+            pr = kpis.run_rate(sub, D, "week" if kind == "Semana" else "month").iloc[0] if not sub.empty else None
+            row[f"{PN[p]}"] = round(c)
+            row[f"{PN[p]} Δ%"] = (kpis.pct(c, bb) or 0) * 100 if bb else None
+            row[f"{PN[p]} proy. vs ant.%"] = (pr["vs_base_pct"] or 0) * 100 if pr is not None and pr["base_sales"] else None
+        row["Total"] = round(tot_c)
+        row["Total Δ%"] = (kpis.pct(tot_c, tot_b) or 0) * 100 if tot_b else None
+        rows.append(row)
+    t = pd.DataFrame(rows)
+    cfg = {c_: st.column_config.NumberColumn(format="%+.1f%%") for c_ in t.columns if "%" in c_}
+    cfg.update({c_: st.column_config.NumberColumn(format="localized") for c_ in t.columns
+                if c_ not in cfg and c_ != "Tienda"})
+    st.dataframe(t, hide_index=True, use_container_width=True, column_config=cfg)
+
+    # ¿qué plataforma explica el cambio de cada tienda?
+    fig = go.Figure()
+    for p in plats:
+        deltas = []
+        for b in [x for x in BN if x in SB]:
+            sub = panel[(panel["branch_id"] == b) & (panel["platform_id"] == p)]
+            deltas.append(kpis.summarize(kpis.filt(sub, *cur_r))["sales"] - kpis.summarize(kpis.filt(sub, *base_r))["sales"])
+        fig.add_bar(y=[BN[x] for x in BN if x in SB], x=deltas, name=PN[p], orientation="h",
+                    marker=dict(color=PLAT_COLOR[p], cornerradius=3),
+                    hovertemplate="%{y} · " + PN[p] + ": %{x:,.0f}<extra></extra>")
+    fig.update_layout(barmode="relative", title=dict(text=f"¿Qué plataforma explica el cambio de cada tienda? "
+                                                          f"(Δ venta, {kind.lower()} vs anterior)", font=dict(size=14)))
+    fig.add_vline(x=0, line_color=BASE, line_width=1)
+    st.plotly_chart(chart_layout(fig, 320), use_container_width=True, theme="streamlit")
+    store_drilldown(kind)
+
+
+def _q(sql_, **kw):
+    try:
+        return sql(sql_, **kw)
+    except Exception:
+        return pd.DataFrame()
+
+
+def store_drilldown(kind: str):
+    st.markdown("##### Diagnóstico de una tienda")
+    stores = [x for x in BN if x in SB]
+    if not stores:
+        return
+    b = st.selectbox("Tienda", stores, format_func=BN.get, key="drill_store")
+    cur_r, base_r = _period_ranges(kind)
+    rows, lines = [], []
+    tot_delta = 0.0
+    pr = {"a": cur_r[0].isoformat(), "b": cur_r[1].isoformat(), "c": base_r[0].isoformat(), "d": base_r[1].isoformat(),
+          "br": b}
+    for p in [x for x in PN if x in set(panel["platform_id"])]:
+        sub = panel[(panel["branch_id"] == b) & (panel["platform_id"] == p)]
+        c, bb = kpis.summarize(kpis.filt(sub, *cur_r)), kpis.summarize(kpis.filt(sub, *base_r))
+        if not c["orders"] and not bb["orders"]:
+            continue
+        d = c["sales"] - bb["sales"]
+        tot_delta += d
+        # efecto volumen (órdenes) vs efecto ticket (LMDI)
+        eff_o = eff_t = None
+        if c["orders"] and bb["orders"] and c["sales"] and bb["sales"] and c["sales"] != bb["sales"]:
+            import math
+            L = d / (math.log(c["sales"]) - math.log(bb["sales"]))
+            eff_o, eff_t = L * math.log(c["orders"] / bb["orders"]), L * math.log(c["ticket"] / bb["ticket"])
+        q = _q("""SELECT SUM(CASE WHEN business_date BETWEEN :a AND :b THEN 1 ELSE 0 END) cur,
+                         SUM(CASE WHEN business_date BETWEEN :c AND :d THEN 1 ELSE 0 END) prev
+                  FROM quality_events WHERE branch_id=:br AND platform_id=:p AND kind='reclamo'""", p=p, **pr)
+        rows.append({"Plataforma": PN[p], "Venta": round(c["sales"]), "Venta anterior": round(bb["sales"]),
+                     "Δ venta": round(d), "Δ %": (kpis.pct(c["sales"], bb["sales"]) or 0) * 100,
+                     "Órdenes Δ %": (kpis.pct(c["orders"], bb["orders"]) or 0) * 100,
+                     "Ticket Δ %": (kpis.pct(c["ticket"], bb["ticket"]) or 0) * 100,
+                     "Por menos/más órdenes": round(eff_o) if eff_o is not None else None,
+                     "Por ticket": round(eff_t) if eff_t is not None else None,
+                     "Cancelaciones": int(c["cancelled_orders"]),
+                     "Min. fuera de línea": c["unavailable_minutes"] if c["unavailable_minutes"] is not None else None,
+                     "Reclamos": int(q["cur"].iloc[0] or 0) if not q.empty else None})
+    if not rows:
+        st.info("Sin datos para esta tienda en el período.")
+        return
+    t = pd.DataFrame(rows)
+    pc = st.column_config.NumberColumn(format="%+.1f%%")
+    loc = st.column_config.NumberColumn(format="localized")
+    st.dataframe(t, hide_index=True, use_container_width=True,
+                 column_config={"Venta": loc, "Venta anterior": loc, "Δ venta": loc, "Por menos/más órdenes": loc,
+                                "Por ticket": loc, "Δ %": pc, "Órdenes Δ %": pc, "Ticket Δ %": pc})
+    # explicación en palabras
+    tot_prev = t["Venta anterior"].sum()
+    word = "sube" if tot_delta >= 0 else "baja"
+    lines.append(f"**{BN[b]} {word} {pctf(tot_delta / tot_prev if tot_prev else None)} ({money(tot_delta)})** "
+                 f"en la {'semana' if kind == 'Semana' else 'parte del mes'} vs el mismo período anterior.")
+    for r in t.sort_values("Δ venta", key=lambda s_: s_ * (1 if tot_delta < 0 else -1)).to_dict("records"):
+        share = r["Δ venta"] / tot_delta * 100 if tot_delta else 0
+        eo, et = r["Por menos/más órdenes"], r["Por ticket"]
+        if eo is not None and et is not None and not (pd.isna(eo) or pd.isna(et)):
+            why = ("menos pedidos" if eo < 0 else "más pedidos") if abs(eo) >= abs(et) else \
+                  ("un ticket más bajo" if et < 0 else "un ticket más alto")
+        else:
+            why = "volumen"
+        lines.append(f"- **{r['Plataforma']}**: {money(r['Δ venta'])} ({pctf(r['Δ %'] / 100)}), explica el "
+                     f"{share:.0f}% del cambio; principalmente por {why} (pedidos {pctf(r['Órdenes Δ %'] / 100)}, "
+                     f"ticket {pctf(r['Ticket Δ %'] / 100)}).")
+    f = _q("SELECT * FROM funnel_period WHERE branch_id=:br ORDER BY end_date DESC", br=b)
+    if not f.empty:
+        r = f.iloc[0]
+        if pd.notna(r["menu_views"]) and r["menu_views"]:
+            lines.append(f"- Embudo {PN.get(r['platform_id'], r['platform_id'])} ({pd.to_datetime(r['start_date']):%d/%m}–"
+                         f"{pd.to_datetime(r['end_date']):%d/%m}): {num(r['store_views'])} vieron la tienda → "
+                         f"{num(r['menu_views'])} el menú ({pctf(r['menu_views'] / r['store_views'], False)}) → "
+                         f"{num(r['orders'])} pedidos (CVR menú {pctf(r['orders'] / r['menu_views'], False)}).")
+    st.markdown("\n".join(lines))
+    st.caption("'Por menos/más órdenes' y 'Por ticket' reparten el Δ venta entre volumen y ticket (suman el total). "
+               "Sesiones/conversión diarias no están disponibles en las plataformas; ver pantalla Embudo y conversión.")
+
+
+def page_embudo():
+    header("Embudo y conversión")
+    st.markdown("Qué tan bien convertimos las visitas en pedidos, por plataforma y tienda.")
+    f = sql("SELECT * FROM funnel_period ORDER BY end_date DESC, platform_id")
+    if f.empty:
+        st.info("Sin datos de embudo cargados.")
+        return
+    allb = f"ALL_{BRAND}" if BRAND else None
+    f = f[f["branch_id"].isin(list(SB) + ([allb] if allb else []))]
+    if sel_p:
+        f = f[f["platform_id"].isin(sel_p)]
+    f["Tienda"] = f["branch_id"].map(lambda x: BN_ALL.get(x, "Todas las tiendas"))
+    f["Plataforma"] = f["platform_id"].map(PN_ALL)
+    f["Período"] = pd.to_datetime(f["start_date"]).dt.strftime("%d/%m/%y") + " – " + \
+        pd.to_datetime(f["end_date"]).dt.strftime("%d/%m/%y")
+    f["% abre el menú"] = f["menu_views"] / f["store_views"] * 100
+    f["% agrega al carrito"] = f["add_to_cart"] / f["menu_views"] * 100
+    f["% compra (del carrito)"] = f["orders"] / f["add_to_cart"] * 100
+    f["CVR menú %"] = (f["orders"] / f["menu_views"] * 100).fillna(f["conversion_reported"] * 100)
+    f["CVR total %"] = f["orders"] / f["store_views"] * 100
+
+    ub = f[(f["platform_id"] == "ubereats") & f["menu_views"].notna()]
+    if not ub.empty:
+        last_end = ub["end_date"].max()
+        cur = ub[(ub["end_date"] == last_end) & ~ub["branch_id"].str.startswith("ALL_")].sort_values("CVR menú %")
+        st.markdown(f"##### Uber Eats · embudo por tienda ({cur['Período'].iloc[0] if len(cur) else ''})")
+        if len(cur):
+            c1, c2 = st.columns(2)
+            for col, m_, title in ((c1, "% abre el menú", "Visibilidad: % que abre el menú tras ver la tienda"),
+                                   (c2, "CVR menú %", "Conversión: pedidos / vistas del menú")):
+                d_ = cur.sort_values(m_)
+                avg = ub[(ub["end_date"] == last_end) & ub["branch_id"].str.startswith("ALL_")]
+                fig = go.Figure(go.Bar(x=d_[m_], y=d_["Tienda"], orientation="h",
+                                       marker=dict(color=PLAT_COLOR["ubereats"], cornerradius=4),
+                                       text=[f"{v:.1f}%" for v in d_[m_]], textposition="outside"))
+                if not avg.empty:
+                    fig.add_vline(x=float(avg[m_].iloc[0]), line_dash="dash", line_color=BASE,
+                                  annotation_text=f"Kobo {float(avg[m_].iloc[0]):.1f}%", annotation_position="top")
+                fig.update_layout(title=dict(text=title, font=dict(size=14)))
+                fig.update_xaxes(ticksuffix="%", range=[0, float(d_[m_].max()) * 1.25])
+                col.plotly_chart(chart_layout(fig, 300, False), use_container_width=True, theme="streamlit")
+            st.caption("Valores de Las Condes, Manuel Montt y total: CSV exacto del portal. Resto: leídos en pantalla "
+                       "(redondeados a miles).")
+    show = f[["Plataforma", "Tienda", "Período", "store_views", "menu_views", "add_to_cart", "orders",
+              "% abre el menú", "% agrega al carrito", "% compra (del carrito)", "CVR menú %", "CVR total %"]].rename(
+        columns={"store_views": "Vieron la tienda (sesiones)", "menu_views": "Vieron el menú",
+                 "add_to_cart": "Agregaron al carrito", "orders": "Pedidos"})
+    pc = st.column_config.NumberColumn(format="%.1f%%")
+    loc = st.column_config.NumberColumn(format="localized")
+    st.markdown("##### Detalle")
+    st.dataframe(show.round(1), hide_index=True, use_container_width=True,
+                 column_config={**{c_: pc for c_ in show.columns if "%" in c_},
+                                **{c_: loc for c_ in ["Vieron la tienda (sesiones)", "Vieron el menú",
+                                                      "Agregaron al carrito", "Pedidos"]}})
+    with st.expander("¿Por qué no hay sesiones diarias? ¿Cómo completar el embudo?"):
+        st.markdown("""
+- **Uber Eats** entrega el embudo (vieron la tienda → menú → carrito → pedido) solo por **período**, no por día.
+  Para ver la evolución semanal se descarga el embudo de cada tienda semana a semana (ver `docs/08_embudo_semanal.md`).
+- **Rappi** no exporta visitas: solo muestra en pantalla la *tasa de conversión* por tienda; se registra en la
+  plantilla `plantilla_embudo.csv` (columna conversion_pct).
+- **Justo** no tiene visitas en su panel: requiere Google Analytics en la tienda web.
+""")
+
+
 pages = [
     st.Page(page_resumen, title="Resumen ejecutivo", icon="🏠", url_path="resumen", default=True),
-    st.Page(lambda: (page_sucursales(), _sucursales_extra()), title="Sucursales", icon="🏪", url_path="sucursales"),
+    st.Page(lambda: (page_sucursales(), store_platform_section(), _sucursales_extra()), title="Sucursales", icon="🏪", url_path="sucursales"),
     st.Page(page_plataformas, title="Plataformas", icon="📱", url_path="plataformas"),
     st.Page(lambda: (page_mix(), uber_product_section()), title="Mix de productos", icon="🍔", url_path="mix"),
     st.Page(lambda: (page_semanal(), hourly_section()), title="Análisis semanal", icon="📅", url_path="semanal"),
     st.Page(page_mensual, title="Análisis mensual", icon="🗓️", url_path="mensual"),
+    st.Page(page_embudo, title="Embudo y conversión", icon="🔎", url_path="embudo"),
     st.Page(page_rentabilidad, title="Rentabilidad y calidad", icon="💰", url_path="rentabilidad"),
     st.Page(page_alertas, title="Alertas", icon="🚨", url_path="alertas"),
     st.Page(page_ia, title="Analista IA", icon="🧠", url_path="analista"),

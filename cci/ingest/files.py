@@ -24,7 +24,8 @@ from .normalize import to_local_datetime, to_number, norm_text
 
 NUMERIC = {"gross_amount", "discount_merchant", "discount_platform", "commission", "other_fees",
            "payout_amount", "quantity", "amount", "scheduled_minutes", "open_minutes",
-           "offline_minutes", "sessions", "line_no"}
+           "offline_minutes", "sessions", "line_no", "store_views", "menu_views", "add_to_cart", "orders",
+           "conversion_reported"}
 ORDER_FIELDS = ["order_id", "store", "created_at", "status", "gross_amount", "discount_merchant",
                 "discount_platform", "commission", "other_fees", "payout_amount", "cancel_reason"]
 

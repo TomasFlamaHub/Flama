@@ -213,11 +213,44 @@ def load_store_day(df: pd.DataFrame, platform_id: str, run_id: str, source: str,
     return res
 
 
+def load_funnel(df: pd.DataFrame, platform_id: str, run_id: str, source: str, is_demo: bool = False) -> LoadResult:
+    """Embudo por período: store, start, end, [store_views, menu_views, add_to_cart, orders, conversion_reported].
+
+    store puede ser una tienda o 'TODAS' (todas las tiendas de la marca)."""
+    res = LoadResult("funnel_period", rows_read=len(df))
+    df = _require(df, ["store", "start", "end"], res, platform_id)
+    if df.empty:
+        return res
+    resolver = BranchResolver()
+    out = []
+    for _, r in df.iterrows():
+        st = str(r["store"]).strip()
+        if norm_text(st) in ("todas", "all", "total"):
+            brands = [b for b, v in config.brands().items() if platform_id in v["platforms"]]
+            b = f"ALL_{r.get('brand') or (brands[0] if brands else 'kobo')}"
+        else:
+            b = resolver.resolve(platform_id, st)
+        if not b:
+            res.rejected += 1
+            res.issue("error", "sucursal_desconocida", f"Tienda no mapeada en embudo: {st}", platform_id)
+            continue
+        f = lambda c: (None if c not in r or pd.isna(r[c]) else float(r[c]))  # noqa: E731
+        conv = f("conversion_reported")
+        out.append({"platform_id": platform_id, "branch_id": b,
+                    "start_date": pd.to_datetime(r["start"]).date(), "end_date": pd.to_datetime(r["end"]).date(),
+                    "store_views": f("store_views"), "menu_views": f("menu_views"), "add_to_cart": f("add_to_cart"),
+                    "orders": f("orders"), "conversion_reported": conv / 100 if conv and conv > 1 else conv,
+                    "is_demo": is_demo, "source": source, "run_id": run_id})
+    res.inserted, res.updated = db.upsert(db.funnel_period, out)
+    return res
+
+
 LOADERS = {
     "orders": load_orders,
     "order_items": load_order_items,
     "adjustments": load_adjustments,
     "store_day": load_store_day,
+    "funnel_period": load_funnel,
 }
 
 
