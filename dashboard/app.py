@@ -14,7 +14,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+import importlib  # noqa: E402
+
 from cci import config, db, kpis  # noqa: E402
+
+# Streamlit solo recarga el script principal: se recargan a mano los módulos de cci/ para que un cambio
+# en GitHub (código o base comprimida) se aplique sin reiniciar el servidor.
+for _m in (config, db, kpis):
+    importlib.reload(_m)
 
 st.set_page_config(page_title="Centro de Control", page_icon="📊", layout="wide",
                    initial_sidebar_state="expanded")
@@ -126,9 +133,17 @@ BN_ALL, PN_ALL, BRANDS = config.branch_names(), config.platform_names(), config.
 SALES_LABEL = "Venta bruta" if kpis.sales_col() == "gross" else "Venta neta"
 
 if dmax is None:
+    st.cache_data.clear()   # no dejar en memoria el estado "sin datos"
     st.title("Centro de Control Comercial")
     st.warning("Todavía no hay datos cargados. Ver README: cargar plantillas, conectar fuentes o "
                "ejecutar `python -m cci.cli demo` para ver una demostración.")
+    with st.expander("Diagnóstico"):
+        gz = [str(g) for g in (config.DATA_DIR / "cci.db.gz", config.ROOT / "cci.db.gz") if g.exists()]
+        dbf = config.DATA_DIR / "cci.db"
+        st.write({"base comprimida encontrada": gz or "no",
+                  "base local": str(dbf), "existe": dbf.exists(),
+                  "tamaño (bytes)": dbf.stat().st_size if dbf.exists() else 0,
+                  "DATABASE_URL configurada": bool(os.environ.get("DATABASE_URL"))})
     st.stop()
 
 # ------------------------------------------------------------------ filtros (barra lateral)
