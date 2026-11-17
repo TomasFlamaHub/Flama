@@ -31,7 +31,15 @@ def database_url() -> str:
             url = "postgresql+psycopg://" + url[len("postgresql://"):]
         return url
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    return f"sqlite:///{DATA_DIR / 'cci.db'}"
+    db_file = DATA_DIR / "cci.db"
+    # En el panel publicado la base viaja comprimida (cci.db.gz, en data/ o en la raíz del repo).
+    gz = next((g for g in (DATA_DIR / "cci.db.gz", ROOT / "cci.db.gz") if g.exists()), None)
+    if gz and (not db_file.exists() or gz.stat().st_mtime > db_file.stat().st_mtime):
+        import gzip
+        import shutil
+        with gzip.open(gz, "rb") as src, open(db_file, "wb") as dst:
+            shutil.copyfileobj(src, dst)
+    return f"sqlite:///{db_file}"
 
 
 def branch_names() -> dict[str, str]:
