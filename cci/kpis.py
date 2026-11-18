@@ -416,3 +416,60 @@ def branch_mix_divergence(mix: pd.DataFrame) -> pd.DataFrame:
                      "sobre_representado": f"{diff.index[-1]} (+{diff.iloc[-1]*100:.1f} pp)",
                      "sub_representado": f"{diff.index[0]} ({diff.iloc[0]*100:.1f} pp)"})
     return pd.DataFrame(rows).sort_values("divergencia", ascending=False) if rows else pd.DataFrame()
+
+
+# --------------------------------------------------------------------------- marketing (Ads y promociones)
+_RX_PERIOD = None
+
+
+def ads_daily(start: date, end: date, branches=None, platforms=None) -> pd.DataFrame:
+    """Gasto en Ads por día. Rappi factura por campaña (descripción 'start date: .. end date: ..'):
+    el monto se reparte en partes iguales entre los días de la campaña."""
+    import re
+    global _RX_PERIOD
+    if _RX_PERIOD is None:
+        _RX_PERIOD = re.compile(r"start date:\s*(\d{1,2} \w{3} \d{2}).*?end date:\s*(\d{1,2} \w{3} \d{2})", re.I)
+    c = db.read_df("SELECT platform_id, branch_id, business_date, amount, description FROM costs WHERE kind='ads' "
+                   "AND business_date BETWEEN :s AND :e",
+                   {"s": (start - timedelta(days=20)).isoformat(), "e": (end + timedelta(days=20)).isoformat()})
+    rows = []
+    for r in c.itertuples():
+        m = _RX_PERIOD.search(str(r.description or ""))
+        bd = pd.to_datetime(r.business_date).date()
+        if m:
+            a = pd.to_datetime(m.group(1), format="%d %b %y").date()
+            b = pd.to_datetime(m.group(2), format="%d %b %y").date()
+            ds = days(a, b) if b >= a else [bd]
+        else:
+            ds = [bd]
+        for d in ds:
+            rows.append((d, r.branch_id, r.platform_id, float(r.amount) / len(ds)))
+    df = pd.DataFrame(rows, columns=["business_date", "branch_id", "platform_id", "ads"])
+    if df.empty:
+        return df
+    df = df[(df["business_date"] >= start) & (df["business_date"] <= end)]
+    if branches:
+        df = df[df["branch_id"].isin(branches)]
+    if platforms:
+        df = df[df["platform_id"].isin(platforms)]
+    return df.groupby(["business_date", "branch_id", "platform_id"], as_index=False)["ads"].sum()
+
+
+def marketing_daily(start: date, end: date, branches=None, platforms=None) -> pd.DataFrame:
+    """Venta, pedidos, Ads y promociones por día x tienda x plataforma.
+    Promociones = descuentos que paga el local + tarifa por canje de ofertas (otros cargos)."""
+    o = db.read_df("""SELECT business_date, branch_id, platform_id, COUNT(*) AS orders, SUM(gross_amount) AS gross,
+                      SUM(COALESCE(discount_merchant,0)) AS promo_disc, SUM(COALESCE(other_fees,0)) AS promo_fee
+                      FROM orders WHERE status='completed' AND business_date BETWEEN :s AND :e
+                      GROUP BY 1,2,3""", {"s": start.isoformat(), "e": end.isoformat()})
+    o["business_date"] = pd.to_datetime(o["business_date"]).dt.date
+    if branches:
+        o = o[o["branch_id"].isin(branches)]
+    if platforms:
+        o = o[o["platform_id"].isin(platforms)]
+    a = ads_daily(start, end, branches, platforms)
+    m = o.merge(a, how="outer", on=["business_date", "branch_id", "platform_id"]) if not a.empty else o.assign(ads=0.0)
+    m = m.fillna({"orders": 0, "gross": 0, "promo_disc": 0, "promo_fee": 0, "ads": 0})
+    m["promo"] = m["promo_disc"] + m["promo_fee"]
+    m["marketing"] = m["promo"] + m["ads"]
+    return m

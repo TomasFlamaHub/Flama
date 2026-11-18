@@ -198,8 +198,12 @@ def header(title: str, subtitle: str = ""):
     st.caption(f"{scope} · día analizado: {DIAS[D.weekday()]} {D:%d/%m/%Y}" + (f" · {subtitle}" if subtitle else ""))
 
 
-def metric(col, label, value, delta=None, help=None, inverse=False):
-    col.metric(label, value, delta, delta_color="inverse" if inverse else "normal", help=help)
+def metric(col, label, value, delta=None, help=None, inverse=False, neutral=False):
+    """neutral=True: el texto bajo el valor es informativo (no una variación), sin flecha ni color."""
+    if neutral:
+        col.metric(label, value, delta, delta_color="off", delta_arrow="off", help=help)
+    else:
+        col.metric(label, value, delta, delta_color="inverse" if inverse else "normal", help=help)
 
 
 def alert_cards(df: pd.DataFrame, limit: int | None = None):
@@ -1232,6 +1236,127 @@ def page_embudo():
 """)
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def mkt_for(a: date, b: date, branches: tuple, platforms: tuple) -> pd.DataFrame:
+    return kpis.marketing_daily(a, b, list(branches) or None, list(platforms) or None)
+
+
+def page_ads():
+    header("Ads y promociones")
+    opt = st.radio("Período", list(PERIOD_OPTS_LONG), horizontal=True, index=3, key="ads_period")
+    a, b = PERIOD_OPTS_LONG[opt]()
+    m = mkt_for(a, b, tuple(SB), tuple(sel_p))
+    if m.empty:
+        st.info("Sin datos en el período.")
+        return
+    tot = m[["gross", "orders", "ads", "promo", "marketing"]].sum()
+    c = st.columns(5)
+    metric(c[0], "Inversión en Ads", money(tot["ads"]), f"{pctf(tot['ads'] / tot['gross'], False)} de la venta",
+           help="Rappi Ads + anuncios de Uber Eats (lo que cobra cada plataforma).", neutral=True)
+    metric(c[1], "Promociones (costo del local)", money(tot["promo"]), f"{pctf(tot['promo'] / tot['gross'], False)} de la venta",
+           help="Descuentos financiados por Kobo + tarifa por canje de ofertas (Uber).", neutral=True)
+    metric(c[2], "Marketing total", money(tot["marketing"]), f"{pctf(tot['marketing'] / tot['gross'], False)} de la venta", neutral=True)
+    metric(c[3], "Costo de marketing por pedido", money(tot["marketing"] / tot["orders"] if tot["orders"] else None))
+    metric(c[4], "Venta por $1 de marketing", f"${tot['gross'] / tot['marketing']:.1f}".replace(".", ",") if tot["marketing"] else "–",
+           help="Venta bruta total / (Ads + promociones). No es ROAS de campaña: incluye toda la venta.")
+    st.caption("Las cifras de las tarjetas no llevan comparación: son el total del período elegido.")
+
+    st.markdown("##### Por tienda y plataforma")
+    g = m.groupby(["branch_id", "platform_id"])[["gross", "orders", "ads", "promo", "marketing"]].sum().reset_index()
+    g = g[g["gross"] > 0]
+    t = pd.DataFrame({"Tienda": g["branch_id"].map(BN_ALL), "Plataforma": g["platform_id"].map(PN_ALL),
+                      "Venta": g["gross"].round(0), "Pedidos": g["orders"], "Ads $": g["ads"].round(0),
+                      "Ads %": g["ads"] / g["gross"] * 100, "Promos $": g["promo"].round(0),
+                      "Promos %": g["promo"] / g["gross"] * 100, "Marketing %": g["marketing"] / g["gross"] * 100,
+                      "Ads por pedido": (g["ads"] / g["orders"]).round(0),
+                      "Marketing por pedido": (g["marketing"] / g["orders"]).round(0)})
+    loc = st.column_config.NumberColumn(format="localized")
+    pc = st.column_config.NumberColumn(format="%.1f%%")
+    st.dataframe(t.sort_values(["Plataforma", "Marketing %"], ascending=[True, False]), hide_index=True,
+                 use_container_width=True,
+                 column_config={**{k: loc for k in ["Venta", "Pedidos", "Ads $", "Promos $", "Ads por pedido",
+                                                    "Marketing por pedido"]},
+                                **{k: pc for k in ["Ads %", "Promos %", "Marketing %"]}})
+
+    m["week"] = pd.to_datetime(m["business_date"]).dt.to_period("W-SUN").dt.start_time
+    w = m.groupby(["week", "platform_id"])[["gross", "orders", "ads", "promo"]].sum().reset_index()
+    c1, c2 = st.columns(2)
+    with c1:
+        fig = go.Figure()
+        ww = w.groupby("week")[["ads", "promo", "gross"]].sum()
+        fig.add_bar(x=ww.index, y=ww["promo"], name="Promociones", marker=dict(color="#86b6ef", cornerradius=3))
+        fig.add_bar(x=ww.index, y=ww["ads"], name="Ads", marker=dict(color="#1c5cab", cornerradius=3))
+        fig.update_layout(barmode="stack", bargap=0.3,
+                          title=dict(text="Inversión semanal en marketing ($)", font=dict(size=14)))
+        st.plotly_chart(chart_layout(fig, 300), use_container_width=True, theme="streamlit")
+    with c2:
+        fig = go.Figure()
+        for p in [x for x in PN if x in set(w["platform_id"])]:
+            wp = w[w["platform_id"] == p]
+            fig.add_scatter(x=wp["week"], y=(wp["ads"] + wp["promo"]) / wp["gross"].where(wp["gross"] > 0) * 100,
+                            name=PN[p], mode="lines+markers", line=dict(color=PLAT_COLOR[p], width=2), marker=dict(size=7))
+        fig.update_layout(title=dict(text="Marketing como % de la venta, por semana", font=dict(size=14)))
+        fig = chart_layout(fig, 300)
+        fig.update_yaxes(ticksuffix="%", tickformat=".0f")
+        st.plotly_chart(fig, use_container_width=True, theme="streamlit")
+    st.caption("Semanas de lunes a domingo; la primera y la última pueden estar incompletas. Rappi factura Ads por "
+               "campaña (7–10 días): el gasto se reparte en partes iguales entre los días de cada campaña. "
+               "Uber de septiembre aún no está cargado (por eso esas semanas se ven bajas).")
+
+    st.markdown("##### ¿Las semanas con más Ads venden más?")
+    sw = m.groupby(["week", "branch_id", "platform_id"]).agg(gross=("gross", "sum"), ads=("ads", "sum"),
+                                                              dias=("orders", lambda x: int((x > 0).sum()))).reset_index()
+    # solo semanas completas (6 días con venta: Kobo no abre los domingos) para no mezclar huecos de datos
+    sw = sw[(sw["ads"] > 0) & (sw["gross"] > 0) & (sw["dias"] >= 6)]
+    fig = go.Figure()
+    notes = []
+    for p in [x for x in PN if x in set(sw["platform_id"])]:
+        sp = sw[sw["platform_id"] == p]
+        fig.add_scatter(x=sp["ads"], y=sp["gross"], mode="markers", name=PN[p],
+                        marker=dict(color=PLAT_COLOR[p], size=9, line=dict(color="#fcfcfb", width=2)),
+                        text=sp["branch_id"].map(BN_ALL) + " · semana " + sp["week"].dt.strftime("%d/%m"),
+                        hovertemplate="%{text}<br>Ads %{x:,.0f}<br>Venta %{y:,.0f}<extra></extra>")
+        # relación dentro de cada tienda (evita confundir tiendas grandes con más gasto)
+        corr = []
+        for bb, sb in sp.groupby("branch_id"):
+            if len(sb) >= 5 and sb["ads"].std() > 0:
+                corr.append(sb["ads"].corr(sb["gross"]))
+        if corr:
+            notes.append(f"{PN[p]}: correlación promedio dentro de cada tienda {sum(corr) / len(corr):+.2f}")
+    fig.update_xaxes(title="Ads de la semana ($)", tickformat=",.0f")
+    fig.update_yaxes(title="Venta de la semana ($)")
+    st.plotly_chart(chart_layout(fig, 340), use_container_width=True, theme="streamlit")
+    st.caption("Cada punto es una tienda en una semana. " + (" · ".join(notes) + ". " if notes else "") +
+               "Correlación cercana a 0 = las semanas con más Ads no venden claramente más; cercana a +1 = sí. "
+               "Es una señal, no una prueba de causa (también influyen clima, feriados y promociones).")
+
+    st.markdown("---\n##### Resultado por campaña")
+    cp = sql("SELECT * FROM campaigns WHERE end_date >= :a AND start_date <= :b", a=a.isoformat(), b=b.isoformat())
+    if cp.empty:
+        st.info("Aún no hay datos por campaña. Rappi (Marketing › RappiAds › Desempeño) y Uber (Marketing › "
+                "Campañas / Anuncios) muestran ventas y pedidos atribuidos a cada campaña; ver docs/09_ads_campanas.md "
+                "para descargarlos con Claude en Chrome. Con eso se calcula ROAS y costo por pedido de cada campaña.")
+        return
+    cp["Tienda"] = cp["branch_id"].map(lambda x: BN_ALL.get(x, "Todas"))
+    cp["Plataforma"] = cp["platform_id"].map(PN_ALL)
+    cp["ROAS"] = (cp["sales"] / cp["spend"]).where(cp["spend"] > 0).fillna(cp["roas_reported"])
+    cp["Costo por pedido"] = (cp["spend"] / cp["orders"]).where(cp["orders"] > 0)
+    cp["CTR %"] = (cp["clicks"] / cp["impressions"] * 100).where(cp["impressions"] > 0)
+    cp["Conv. clic→pedido %"] = (cp["orders"] / cp["clicks"] * 100).where(cp["clicks"] > 0)
+    show = cp[["Plataforma", "kind", "campaign", "Tienda", "start_date", "end_date", "spend", "orders", "sales",
+               "new_customers", "ROAS", "Costo por pedido", "CTR %", "Conv. clic→pedido %"]].rename(
+        columns={"kind": "Tipo", "campaign": "Campaña", "start_date": "Desde", "end_date": "Hasta", "spend": "Inversión",
+                 "orders": "Pedidos", "sales": "Ventas atribuidas", "new_customers": "Clientes nuevos"})
+    st.dataframe(show.sort_values("ROAS"), hide_index=True, use_container_width=True,
+                 column_config={"Inversión": loc, "Ventas atribuidas": loc, "Costo por pedido": loc,
+                                "ROAS": st.column_config.NumberColumn(format="%.1fx"),
+                                "CTR %": pc, "Conv. clic→pedido %": pc})
+    bad = show[(show["ROAS"].notna()) & (show["ROAS"] < 3)]
+    if not bad.empty:
+        st.warning(f"{len(bad)} campaña(s) con ROAS menor a 3x (por cada $1 invertido vuelven menos de $3 en ventas): "
+                   "revisar segmentación, tienda y horario, o pausarlas.")
+
+
 pages = [
     st.Page(page_resumen, title="Resumen ejecutivo", icon="🏠", url_path="resumen", default=True),
     st.Page(lambda: (page_sucursales(), store_platform_section(), _sucursales_extra()), title="Sucursales", icon="🏪", url_path="sucursales"),
@@ -1240,6 +1365,7 @@ pages = [
     st.Page(lambda: (page_semanal(), hourly_section()), title="Análisis semanal", icon="📅", url_path="semanal"),
     st.Page(page_mensual, title="Análisis mensual", icon="🗓️", url_path="mensual"),
     st.Page(page_embudo, title="Embudo y conversión", icon="🔎", url_path="embudo"),
+    st.Page(page_ads, title="Ads y promociones", icon="📣", url_path="ads"),
     st.Page(page_rentabilidad, title="Rentabilidad y calidad", icon="💰", url_path="rentabilidad"),
     st.Page(page_alertas, title="Alertas", icon="🚨", url_path="alertas"),
     st.Page(page_ia, title="Analista IA", icon="🧠", url_path="analista"),

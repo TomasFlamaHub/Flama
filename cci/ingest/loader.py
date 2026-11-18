@@ -245,12 +245,40 @@ def load_funnel(df: pd.DataFrame, platform_id: str, run_id: str, source: str, is
     return res
 
 
+def load_campaigns(df: pd.DataFrame, platform_id: str, run_id: str, source: str, is_demo: bool = False) -> LoadResult:
+    res = LoadResult("campaigns", rows_read=len(df))
+    df = _require(df, ["campaign", "store", "start", "end"], res, platform_id)
+    resolver = BranchResolver()
+    out = []
+    for _, r in df.iterrows():
+        st = str(r["store"]).strip()
+        if norm_text(st) in ("todas", "all", "total"):
+            brands = [b for b, v in config.brands().items() if platform_id in v["platforms"]]
+            b = f"ALL_{brands[0] if brands else 'kobo'}"
+        else:
+            b = resolver.resolve(platform_id, st)
+        if not b:
+            res.rejected += 1
+            res.issue("error", "sucursal_desconocida", f"Tienda no mapeada en campañas: {st}", platform_id)
+            continue
+        f = lambda c: (None if c not in r or pd.isna(r[c]) else float(r[c]))  # noqa: E731
+        out.append({"platform_id": platform_id, "campaign": str(r["campaign"]).strip()[:200], "branch_id": b,
+                    "start_date": pd.to_datetime(r["start"]).date(), "end_date": pd.to_datetime(r["end"]).date(),
+                    "kind": (str(r.get("kind") or "ads")).strip().lower(), "spend": f("spend"),
+                    "impressions": f("impressions"), "clicks": f("clicks"), "orders": f("orders"),
+                    "sales": f("sales"), "new_customers": f("new_customers"), "roas_reported": f("roas_reported"),
+                    "source": source, "run_id": run_id})
+    res.inserted, res.updated = db.upsert(db.campaigns, out)
+    return res
+
+
 LOADERS = {
     "orders": load_orders,
     "order_items": load_order_items,
     "adjustments": load_adjustments,
     "store_day": load_store_day,
     "funnel_period": load_funnel,
+    "campaigns": load_campaigns,
 }
 
 

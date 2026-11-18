@@ -245,6 +245,21 @@ costs = Table(  # costos que no son por pedido: publicidad, ajustes, cargos
     Column("run_id", String(40)),
 )
 
+campaigns = Table(  # resultado por campaña / oferta (Ads y promociones), según lo que muestra cada portal
+    "campaigns", metadata,
+    Column("platform_id", String(16), primary_key=True),
+    Column("campaign", String(200), primary_key=True),     # nombre o ID de la campaña / oferta
+    Column("branch_id", String(16), primary_key=True),     # tienda o ALL_<marca>
+    Column("start_date", Date, primary_key=True),
+    Column("end_date", Date, primary_key=True),
+    Column("kind", String(20)),          # ads | promocion
+    Column("spend", Float),              # inversión del local (Ads) o costo del descuento (promoción)
+    Column("impressions", Float), Column("clicks", Float),
+    Column("orders", Float), Column("sales", Float), Column("new_customers", Float),
+    Column("roas_reported", Float),      # ROAS que informa el portal, si lo muestra
+    Column("source", String(300)), Column("run_id", String(40)),
+)
+
 ingestion_run = Table(
     "ingestion_run", metadata,
     Column("run_id", String(40), primary_key=True),

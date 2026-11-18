@@ -1,0 +1,21 @@
+# Resultado por campaña de Ads u oferta/promoción, tal como lo muestra cada portal.
+name: plantilla_campanas
+platform: from_column
+dataset: campaigns
+verified: true
+file_glob: ["plantilla_campanas*.csv", "plantilla_campanas*.xlsx"]
+read: {sep: ",", decimal: ".", dayfirst: false}
+columns:
+  platform: plataforma            # ubereats | rappi | justo
+  campaign: campana               # nombre o ID de la campaña / oferta
+  kind: tipo                      # ads | promocion
+  store: tienda                   # nombre de la tienda como en el portal, o TODAS
+  start: desde                    # AAAA-MM-DD
+  end: hasta                      # AAAA-MM-DD
+  spend: inversion                # $ invertidos (Ads) o costo del descuento para el local (promoción)
+  impressions: impresiones
+  clicks: clics
+  orders: pedidos                 # pedidos atribuidos / canjes
+  sales: ventas                   # ventas atribuidas
+  new_customers: clientes_nuevos
+  roas_reported: roas             # si el portal lo muestra (ej. 8.5)
